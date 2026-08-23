@@ -329,7 +329,18 @@ for tr in README.*.md; do
   a=$(grep -c '^## ' README.md); b=$(grep -c '^## ' "$tr")
   [ "$a" = "$b" ] || echo "README sections out of sync: README.md=$a $tr=$b"
 done
+
+# Skill translations drifting from their source, or pointing at a skill that no longer exists
+for zh in docs/skills-zh/*.md; do
+  [ -e "$zh" ] || continue
+  en="skills/$(basename "$zh" .md)/SKILL.md"
+  [ -e "$en" ] || { echo "orphan translation: $zh"; continue; }
+  a=$(grep -c '^## ' "$en"); b=$(grep -c '^## ' "$zh")
+  [ "$a" = "$b" ] || echo "translation sections out of sync: $en=$a $zh=$b"
+done
 ```
+
+**What the translation check can and cannot catch**: section counts catch **structural** drift only. Reword a paragraph without touching a heading and the check still passes. That is the inherent ceiling of this class of check — the English file stays the single source of truth precisely because a stale translation can only mislead a human, never change what runs.
 
 The last two **were both missed in practice on this project**, not hypothetical checks. Cross-file references especially: a broken reference inside one file is visible while editing, across files it is invisible without grep.
 

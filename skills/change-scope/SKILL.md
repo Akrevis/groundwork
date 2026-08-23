@@ -36,3 +36,17 @@ Too many call sites to finish, an unfamiliar module in the way, dynamic dispatch
 ## 4. Look at the target before deleting or overwriting
 
 No exceptions. Read what that file or block actually is, and confirm it has no remaining value, before removing it.
+
+## 5. Check where you are before the first edit
+
+Which branch, and is the working tree clean. One command, before touching anything:
+
+```bash
+git branch --show-current && git status --short -uall
+```
+
+**Why this outranks the call chain**: getting the call chain wrong breaks one function. Being on the wrong branch means **an entire batch of edits lands somewhere it was never meant to go** — and nothing looks abnormal while it happens. Every file writes successfully, every test passes, the commit succeeds. It surfaces later, as a missing commit or a mysterious conflict.
+
+This is not hypothetical. It happened while writing this rule: four files were edited and committed on a release branch by an author who believed the whole time they were on the development branch, because the branch had been switched between turns and never re-checked.
+
+**Re-check after anything that could have moved you**: a checkout in an earlier turn, a command someone else ran, resuming a session, any gap where you were not the only actor.
