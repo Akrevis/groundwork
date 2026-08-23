@@ -322,6 +322,13 @@ done
 grep -rho 'S[0-9]\.[0-9]' docs/ skills/ 2>/dev/null | sort -u | while read ref; do
   grep -q "^### ${ref#S}" docs/design.md || echo "broken section reference: $ref"
 done
+
+# Translated README pairs drifting apart — only meaningful if a translation exists
+for tr in README.*.md; do
+  [ -e "$tr" ] || continue
+  a=$(grep -c '^## ' README.md); b=$(grep -c '^## ' "$tr")
+  [ "$a" = "$b" ] || echo "README sections out of sync: README.md=$a $tr=$b"
+done
 ```
 
 The last two **were both missed in practice on this project**, not hypothetical checks. Cross-file references especially: a broken reference inside one file is visible while editing, across files it is invisible without grep.
