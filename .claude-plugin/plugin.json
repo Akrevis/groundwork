@@ -1,0 +1,8 @@
+{
+  "name": "groundwork",
+  "version": "0.2.0",
+  "description": "Keeps AI from hallucinating in large codebases: force-injects real project state (docs/context.md + git status) at session start, with a /groundwork:docs workflow to maintain it. Projects without it stay completely silent.",
+  "author": {
+    "name": "Akrevis"
+  }
+}

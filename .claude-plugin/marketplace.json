@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "groundwork",
+  "description": "An AI development discipline pack for coding agents.",
+  "owner": {
+    "name": "Akrevis"
+  },
+  "plugins": [
+    {
+      "name": "groundwork",
+      "description": "Stops AI hallucination in large codebases: no invented APIs, files or functions; no breaking code it never fully read; always aware of where the project stands.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
