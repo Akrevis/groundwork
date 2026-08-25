@@ -1,0 +1,502 @@
+#!/usr/bin/env node
+// groundwork audit — the mechanical half of /groundwork:docs audit.
+//
+// Detection mechanises; repair usually needs judgement. This script only detects, and
+// never writes. It reports what it found and, just as importantly, what it skipped.
+//
+//   groundwork-audit            human-readable, aligned columns
+//   groundwork-audit --json     structured, for a caller that wants to organise the report
+//
+// Hard rule inherited from the hook: a broken check may cost its own finding, never the run.
+// Every check is wrapped, and a check that throws is reported as errored rather than silently
+// passing — a check that fails open is worse than no check at all.
+
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+const CONTEXT_MAX_LINES = 60; // above this, context.md likely holds something design.md should
+const ZOMBIE_DAYS = 30; // a plans/ directory untouched this long is worth a look
+
+// ---------- context passed to every check ----------
+
+function makeCtx(root) {
+  const abs = (p) => path.join(root, p);
+  const exists = (p) => fs.existsSync(abs(p));
+  const read = (p) => {
+    try {
+      return fs.readFileSync(abs(p), 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  const list = (dir, ext) => {
+    try {
+      return fs
+        .readdirSync(abs(dir), { withFileTypes: true })
+        .filter((e) => e.isFile() && (!ext || e.name.endsWith(ext)))
+        .map((e) => e.name)
+        .sort();
+    } catch {
+      return [];
+    }
+  };
+  const dirs = (dir) => {
+    try {
+      return fs
+        .readdirSync(abs(dir), { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort();
+    } catch {
+      return [];
+    }
+  };
+  const git = (args) => {
+    try {
+      return execSync(`git ${args}`, {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      return null;
+    }
+  };
+  return { root, abs, exists, read, list, dirs, git };
+}
+
+// ---------- checks ----------
+// Each returns an array of finding strings. Empty array = clean.
+// `skip(ctx)` returning a string means "not applicable here", and the reason is printed —
+// silence about a skipped check is how an all-clear turns into false confidence.
+
+const CHECKS = [
+  {
+    id: 'hook-runs',
+    group: 'liveness',
+    title: 'injection hook executes',
+    skip: (c) => (c.exists('hooks/inject-context.js') ? null : 'no hooks/ — not a package project'),
+    run(c) {
+      try {
+        execSync(`node "${c.abs('hooks/inject-context.js')}"`, {
+          cwd: c.root,
+          stdio: 'ignore',
+        });
+        return [];
+      } catch {
+        return ['hooks/inject-context.js exits non-zero'];
+      }
+    },
+  },
+
+  {
+    id: 'skill-kinds',
+    group: 'liveness',
+    title: 'skill / command classification (ADR-009)',
+    skip: (c) => (c.dirs('skills').length ? null : 'no skills/ — not a package project'),
+    run(c) {
+      // Lists both kinds without judging: telling a legitimate constraint-only skill from an
+      // evaluative one that lost its field requires reading the content, which no check can do.
+      return c.dirs('skills').map((name) => {
+        const body = c.read(`skills/${name}/SKILL.md`) || '';
+        return /disable-model-invocation:\s*true/.test(body)
+          ? `command: ${name}`
+          : `skill (auto-trigger): ${name} — confirm it states constraints, not evaluations`;
+      });
+    },
+  },
+
+  {
+    id: 'dead-links',
+    group: 'form',
+    title: 'files referenced by context.md exist',
+    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md — project not onboarded'),
+    run(c) {
+      const body = c.read('docs/context.md') || '';
+      const refs = [...new Set([...body.matchAll(/`([^`\n]*\.md)`/g)].map((m) => m[1]))];
+      return refs
+        .filter((r) => !/^[A-Za-z]:\//.test(r) && !r.includes('<')) // absolute paths and placeholders are out of scope
+        .filter((r) => !c.exists(r))
+        .map((r) => `context.md points at a file that does not exist: ${r}`);
+    },
+  },
+
+  {
+    id: 'plans-registered',
+    group: 'form',
+    title: 'active plans appear in context.md',
+    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md'),
+    run(c) {
+      const body = c.read('docs/context.md') || '';
+      return c
+        .list('docs/plans', '.md')
+        .filter((f) => !body.includes(f))
+        .map((f) => `plan created but never registered in the active task table: docs/plans/${f}`);
+    },
+  },
+
+  {
+    id: 'adr-numbering',
+    group: 'form',
+    title: 'ADR numbers run without gaps or repeats',
+    skip: (c) => (c.exists('docs/devlog.md') ? null : 'no docs/devlog.md'),
+    run(c) {
+      // Keep the raw string: reporting "ADR-3" when the file says "ADR-003" makes the
+      // reader hunt for a heading that does not exist.
+      const raw = [...(c.read('docs/devlog.md') || '').matchAll(/^## ADR-(\d+)/gm)].map((m) => m[1]);
+      const out = [];
+      raw.forEach((s, i) => {
+        if (Number(s) !== i + 1) out.push(`ADR numbering breaks at entry ${i + 1}: found ADR-${s}`);
+      });
+      return out;
+    },
+  },
+
+  {
+    id: 'devlog-commits',
+    group: 'form',
+    title: 'commits cited by devlog still resolve',
+    skip: (c) => (c.exists('docs/devlog.md') ? null : 'no docs/devlog.md'),
+    run: (c) => citedCommits(c, 'docs/devlog.md', 'devlog'),
+  },
+
+  {
+    id: 'section-refs',
+    group: 'form',
+    title: 'cross-file section references resolve',
+    skip: (c) => (c.exists('docs/design.md') ? null : 'no docs/design.md'),
+    run(c) {
+      const design = c.read('docs/design.md') || '';
+      const seen = new Set();
+      const out = [];
+      for (const dir of ['docs', 'skills']) {
+        for (const file of walk(c, dir)) {
+          const body = c.read(file) || '';
+          for (const m of body.matchAll(/§(\d+\.\d+)/g)) {
+            if (seen.has(m[1])) continue;
+            seen.add(m[1]);
+            if (!new RegExp(`^#{2,4} ${m[1].replace('.', '\\.')}[ .]`, 'm').test(design)) {
+              out.push(`§${m[1]} is referenced but design.md has no such section`);
+            }
+          }
+        }
+      }
+      return out;
+    },
+  },
+
+  {
+    id: 'readme-pair',
+    group: 'form',
+    title: 'README translations keep the same section count',
+    skip: (c) => (c.exists('README.md') ? null : 'no README.md'),
+    run(c) {
+      const base = headings(c.read('README.md'));
+      return c
+        .list('.', '.md')
+        .filter((f) => /^README\..+\.md$/.test(f))
+        .filter((f) => headings(c.read(f)) !== base)
+        .map((f) => `README sections out of sync: README.md=${base} ${f}=${headings(c.read(f))}`);
+    },
+  },
+
+  {
+    id: 'translations',
+    group: 'form',
+    title: 'skill translations exist and match, both directions',
+    skip: (c) => (c.dirs('skills').length ? null : 'no skills/'),
+    run(c) {
+      const out = [];
+      const zhDir = 'docs/skills-zh';
+      if (!c.exists(zhDir)) return out; // no translations at all is a valid state
+      const translated = new Set(c.list(zhDir, '.md').map((f) => f.replace(/\.md$/, '')));
+
+      // forward: a translation whose source is gone
+      for (const name of translated) {
+        if (!c.exists(`skills/${name}/SKILL.md`)) out.push(`orphan translation: ${zhDir}/${name}.md`);
+      }
+      // reverse: a skill nobody translated — the direction the shell version never checked
+      for (const name of c.dirs('skills')) {
+        if (!translated.has(name)) out.push(`skill has no translation: skills/${name}/SKILL.md`);
+      }
+      // structural drift on the pairs that do exist
+      for (const name of translated) {
+        const en = c.read(`skills/${name}/SKILL.md`);
+        if (en === null) continue;
+        const a = headings(en);
+        const b = headings(c.read(`${zhDir}/${name}.md`));
+        if (a !== b) out.push(`translation sections out of sync: ${name} en=${a} zh=${b}`);
+      }
+      return out;
+    },
+  },
+
+  {
+    id: 'roadmap-archived',
+    group: 'form',
+    title: 'archived plans reached the roadmap',
+    skip: (c) => (c.exists('docs/roadmap.md') ? null : 'no docs/roadmap.md — optional file'),
+    run(c) {
+      const body = c.read('docs/roadmap.md') || '';
+      return c
+        .list('docs/plans/archive', '.md')
+        .filter((f) => !body.includes(f))
+        .map((f) => `archived but never added to the roadmap: docs/plans/archive/${f}`);
+    },
+  },
+
+  {
+    id: 'roadmap-pointers',
+    group: 'form',
+    title: 'roadmap pointers still resolve',
+    skip: (c) => (c.exists('docs/roadmap.md') ? null : 'no docs/roadmap.md — optional file'),
+    run(c) {
+      const out = citedCommits(c, 'docs/roadmap.md', 'roadmap');
+      const devlog = c.read('docs/devlog.md') || '';
+      const adrs = [...new Set([...(c.read('docs/roadmap.md') || '').matchAll(/ADR-(\d{3})/g)].map((m) => m[1]))];
+      for (const n of adrs) {
+        if (!new RegExp(`^## ADR-${n} `, 'm').test(devlog)) {
+          out.push(`roadmap cites ADR-${n}, which devlog.md does not contain`);
+        }
+      }
+      return out;
+    },
+  },
+
+  {
+    id: 'context-handwritten',
+    group: 'placement',
+    title: 'context.md does not hand-write what the hook collects',
+    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md'),
+    run(c) {
+      const out = [];
+      (c.read('docs/context.md') || '').split('\n').forEach((line, i) => {
+        if (/^\s*(branch|tech stack|uncommitted|recent commits?)\s*[:：]/i.test(line)) {
+          out.push(`line ${i + 1} hand-writes a field the hook collects: ${line.trim()}`);
+        }
+      });
+      return out;
+    },
+  },
+
+  {
+    id: 'context-size',
+    group: 'placement',
+    title: 'context.md stays small',
+    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md'),
+    run(c) {
+      const n = (c.read('docs/context.md') || '').split('\n').length;
+      return n > CONTEXT_MAX_LINES
+        ? [`context.md is ${n} lines (over ${CONTEXT_MAX_LINES}) — check for content belonging in design.md`]
+        : [];
+    },
+  },
+
+  {
+    id: 'misplaced-content',
+    group: 'placement',
+    title: 'ADR markers in design.md, status text in devlog.md',
+    skip: (c) => (c.exists('docs/design.md') || c.exists('docs/devlog.md') ? null : 'no design.md or devlog.md'),
+    run(c) {
+      const out = [];
+      const scan = (file, re, label) => {
+        (c.read(file) || '').split('\n').forEach((line, i) => {
+          if (re.test(line)) out.push(`${file}:${i + 1} ${label}: ${line.trim().slice(0, 70)}`);
+        });
+      };
+      scan('docs/design.md', /候选方案|options considered|revisit when/i, 'ADR marker — probably belongs in devlog');
+      scan('docs/devlog.md', /^\s*[-|]?\s*(todo|not started|next up|当前进度)\b/i, 'status text — ADRs record decisions, not status');
+      return out;
+    },
+  },
+
+  {
+    id: 'external-deps',
+    group: 'rules',
+    title: 'no dependency on another plugin',
+    skip: (c) => (c.dirs('skills').length || c.exists('hooks') ? null : 'no skills/ or hooks/'),
+    run(c) {
+      const out = [];
+      const names = /\b(ponytail|karpathy|glassbox|memkeep|teamdocs)\b/i;
+      for (const dir of ['hooks', 'skills']) {
+        for (const file of walk(c, dir)) {
+          (c.read(file) || '').split('\n').forEach((line, i) => {
+            if (names.test(line)) out.push(`${file}:${i + 1} names another package: ${line.trim().slice(0, 70)}`);
+          });
+        }
+      }
+      return out;
+    },
+  },
+
+  {
+    id: 'revisit-when',
+    group: 'staleness',
+    title: 'Revisit When clauses, listed not judged',
+    skip: (c) => (c.exists('docs/devlog.md') ? null : 'no docs/devlog.md'),
+    run(c) {
+      // The only forward-looking field in an ADR, and the one nobody rereads. Listing is
+      // the whole intervention; whether a clause has fired is not mechanically decidable.
+      const lines = (c.read('docs/devlog.md') || '').split('\n');
+      const out = [];
+      lines.forEach((line, i) => {
+        if (/\*\*Revisit When\*\*/.test(line)) {
+          const text = line.replace(/.*\*\*Revisit When\*\*[:：]?\s*/, '').trim();
+          const adr = lastAdrBefore(lines, i);
+          out.push(`${adr}: ${text.slice(0, 100) || '(see devlog)'}`);
+        }
+      });
+      return out;
+    },
+  },
+
+  {
+    id: 'zombie-plans',
+    group: 'staleness',
+    title: 'active plans have moved recently',
+    skip: (c) => (c.list('docs/plans', '.md').length ? null : 'no active plans'),
+    run(c) {
+      const last = c.git("log -1 --format=%ct -- docs/plans/");
+      if (!last) return [];
+      const days = Math.floor((Date.now() / 1000 - Number(last)) / 86400);
+      return days > ZOMBIE_DAYS
+        ? [`docs/plans/ has not changed in ${days} days — are those tasks still alive?`]
+        : [];
+    },
+  },
+];
+
+// ---------- helpers ----------
+
+function headings(body) {
+  return body === null ? -1 : (body.match(/^## /gm) || []).length;
+}
+
+function lastAdrBefore(lines, idx) {
+  for (let i = idx; i >= 0; i--) {
+    const m = lines[i].match(/^## (ADR-\d+)/);
+    if (m) return m[1];
+  }
+  return 'devlog';
+}
+
+function citedCommits(c, file, label) {
+  const hashes = [...new Set([...(c.read(file) || '').matchAll(/`([0-9a-f]{7,40})`/g)].map((m) => m[1]))];
+  if (!hashes.length) return [];
+  if (c.git('rev-parse --git-dir') === null) return []; // not a git repo: cannot judge, do not guess
+  // `cat-file -t`, not `cat-file -e <hash>^{commit}`: on Windows execSync goes through
+  // cmd.exe, where `^` is the escape character, so `^{commit}` silently becomes `{commit}`
+  // and every hash reports missing. Asking for the type needs no shell metacharacter.
+  return hashes
+    .filter((h) => c.git(`cat-file -t ${h}`) !== 'commit')
+    .map((h) => `${label} cites a commit that no longer exists: ${h}`);
+}
+
+function walk(c, dir, acc = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(c.abs(dir), { withFileTypes: true });
+  } catch {
+    return acc;
+  }
+  for (const e of entries) {
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) walk(c, rel, acc);
+    else if (/\.(md|js|json)$/.test(e.name)) acc.push(rel);
+  }
+  return acc;
+}
+
+// ---------- run ----------
+
+function audit(root) {
+  const c = makeCtx(root);
+  return CHECKS.map((check) => {
+    const reason = check.skip ? check.skip(c) : null;
+    if (reason) return { id: check.id, group: check.group, title: check.title, status: 'skipped', reason, findings: [] };
+    try {
+      const findings = check.run(c);
+      return {
+        id: check.id,
+        group: check.group,
+        title: check.title,
+        status: findings.length ? 'findings' : 'clean',
+        findings,
+      };
+    } catch (err) {
+      // A check that throws must say so. Failing open would report clean.
+      return { id: check.id, group: check.group, title: check.title, status: 'errored', findings: [String(err && err.message)] };
+    }
+  });
+}
+
+const GROUP_ORDER = ['liveness', 'form', 'placement', 'rules', 'staleness'];
+const INFORMATIONAL = new Set(['skill-kinds', 'revisit-when']); // list, never judge
+
+function render(results, root) {
+  const pad = Math.max(...results.map((r) => r.id.length));
+  const lines = [`groundwork audit · ${root}`, ''];
+
+  for (const group of GROUP_ORDER) {
+    const rows = results.filter((r) => r.group === group);
+    if (!rows.length) continue;
+    lines.push(group.toUpperCase());
+    for (const r of rows) {
+      const mark = { clean: '  ok', findings: '  !!', skipped: '   -', errored: ' ERR' }[r.status];
+      const note =
+        r.status === 'skipped'
+          ? r.reason
+          : r.status === 'clean'
+            ? r.title
+            : INFORMATIONAL.has(r.id)
+              ? `${r.findings.length} listed — read them, they are not errors`
+              : `${r.findings.length} finding(s)`;
+      lines.push(`${mark} ${r.id.padEnd(pad)}  ${note}`);
+      if (r.status === 'findings' || r.status === 'errored') {
+        for (const f of r.findings) lines.push(`${' '.repeat(pad + 7)}${f}`);
+      }
+    }
+    lines.push('');
+  }
+
+  const counted = results.filter((r) => r.status === 'findings' && !INFORMATIONAL.has(r.id));
+  const total = counted.reduce((n, r) => n + r.findings.length, 0);
+  const skipped = results.filter((r) => r.status === 'skipped');
+  const errored = results.filter((r) => r.status === 'errored');
+
+  lines.push(
+    `${total} finding(s) across ${results.length - skipped.length} checks` +
+      (skipped.length ? ` · ${skipped.length} skipped` : '') +
+      (errored.length ? ` · ${errored.length} ERRORED` : '')
+  );
+  lines.push('');
+  lines.push('NOT CHECKED HERE — mechanical checks cannot reach these:');
+  lines.push('  · whether the documentation matches the implementation (design.md §7-8)');
+  lines.push('  · whether injection is actually running — only that the script executes');
+  lines.push('  · whether a roadmap entry landed in the right phase');
+  lines.push('  · whether any description is still true (that is the audit command’s judgement pass)');
+  return lines.join('\n');
+}
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const cwd = process.cwd();
+  let root = cwd;
+  try {
+    root = execSync('git rev-parse --show-toplevel', { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || cwd;
+  } catch {
+    /* not a git repo — audit what is here */
+  }
+  const results = audit(root);
+  if (args.includes('--json')) {
+    process.stdout.write(JSON.stringify({ root, results }, null, 2) + '\n');
+  } else {
+    process.stdout.write(render(results, root) + '\n');
+  }
+  // Exit 0 regardless: this is a report, and a non-zero exit would make it look like a
+  // failed command to whatever ran it.
+  process.exit(0);
+} else {
+  module.exports = { audit, makeCtx, CHECKS, render, headings };
+}

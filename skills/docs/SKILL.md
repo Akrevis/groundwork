@@ -2,7 +2,7 @@
 name: docs
 description: groundwork documentation workflow — init (create context.md and plans/), task (open a task: surface assumptions, define done), wrap (sync at session end), audit (consistency check). Manual invocation only; the model will not trigger this on its own.
 disable-model-invocation: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git rev-parse:*), Bash(git log:*), Bash(git status:*), Bash(git mv:*), Bash(mkdir:*)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git rev-parse:*), Bash(git log:*), Bash(git status:*), Bash(git mv:*), Bash(mkdir:*), Bash(groundwork-audit:*), Bash(node bin/groundwork-audit:*)
 ---
 
 # /groundwork:docs — documentation workflow
@@ -18,6 +18,7 @@ Route on the first word of `$ARGUMENTS`. **Missing, or not one of `init` / `task
 | `docs/context.md` | Facts git can't derive, that the AI doesn't know it's missing | **auto-injected every session** |
 | `docs/plans/<date>-<task>.md` | One task's goal, definition of done, progress | when relevant to the task |
 | `docs/plans/archive/` | Plan documents for finished tasks | rarely |
+| `docs/roadmap.md` | How the project got here: phases, and for each one the ADRs, landing commits and plan documents. **Pointers only, never status** | when the AI needs the shape of the whole history |
 | `docs/design.md` | Architecture snapshot (layout, data flow, known risks) | when the AI is about to change a module |
 | `docs/devlog.md` | ADRs: context / options / decision / rationale / cost / landing commit | when the AI is about to change architecture |
 
@@ -64,9 +65,16 @@ mkdir -p docs/plans/archive
 git mv docs/plans/<file>.md docs/plans/archive/
 ```
 
-Remove that row from the active task table afterwards.
+Then two more edits, both mandatory:
 
-**Why confirm**: moving files has side effects, and "is this task actually done" is a judgement call — getting it wrong means a manual rollback.
+- Remove that row from the active task table in `context.md`
+- **Append the task to the current phase in `docs/roadmap.md`** — what it settled, its ADR if it has one, its landing commit, and a pointer to the archived plan document. **No roadmap yet → ask whether to start one**; like `design.md` and `devlog.md` it is never pre-created, because a project with one archived task has no history worth mapping
+
+**Archiving and registering are two separate actions, and the second is the one that gets dropped.** A plan archived but never added to the roadmap leaves a hole nothing will ever surface: the file is gone from `plans/`, the active task table no longer lists it, and no other check goes looking.
+
+**Opening a new phase is a judgement call — ask the user.** A phase is not a time span, it is "this batch of work solves one problem". wrap appends to the current phase; it never opens one by itself.
+
+**Why confirm the archiving**: moving files has side effects, and "is this task actually done" is a judgement call — getting it wrong means a manual rollback.
 
 ### 5. Update the header commit hash (never skip)
 
@@ -252,7 +260,7 @@ Worth creating → `docs/plans/<YYYY-MM-DD>-<task-slug>.md`:
 - YYYY-MM-DD <what happened>
 ```
 
-**Registering it in the active task table of `context.md` is mandatory.** Creating and registering are two separate actions, and this project has missed the second one in practice: a plan document went from creation to completion without ever appearing in the injection, meaning **the AI never knew that task existed for its entire lifetime** — it only surfaced at archiving time.
+**Registering it in the active task table of `context.md` is mandatory.** Creating and registering are two separate actions, and skipping the second is the easy mistake: the plan document goes from creation to completion without ever appearing in the injection, which means **the AI never knows that task exists for its entire lifetime** — it surfaces only at archiving time.
 
 ### 6. Report
 
@@ -262,145 +270,52 @@ Worth creating → `docs/plans/<YYYY-MM-DD>-<task-slug>.md`:
 
 ## audit — consistency check (periodic, user-initiated)
 
-### The test: is there one obvious fix?
+### 1. Run the mechanical half
 
-**Not "can it be checked mechanically."** Going through the checks one by one showed that test does not hold:
+```bash
+groundwork-audit
+```
+
+The script ships in this plugin's `bin/`, which Claude Code puts on PATH. If the name is not found, fall back to `node bin/groundwork-audit` (only works when the cwd is the groundwork repo itself) and report that the plugin's `bin/` is not on PATH — that is a finding in its own right.
+
+It runs every check that is genuinely mechanical: dead links, unregistered plans, ADR numbering, cited commits, cross-file section references, README and translation drift in both directions, archived plans that never reached the roadmap, hand-written fields the hook already collects, `context.md` size, misplaced content, external-package references, `Revisit When` clauses, zombie plans. Each check reports clean, findings, **skipped with a reason**, or **errored** — a check that throws says so rather than passing quietly.
+
+`--json` gives the same results structured, if you would rather organise the report yourself.
+
+**Do not re-run these checks by hand.** A second copy of a check written into this file is a second implementation that will drift from the first; the script is the only copy.
+
+### 2. The test for what to do with a finding: is there one obvious fix?
+
+**Not "can it be checked mechanically."** Take the checks one at a time and that test falls apart:
 
 > **Detection mechanises. Repair usually needs judgement. Being able to detect is not the same as knowing what to do.**
 >
 > **One obvious fix, apply it. More than one, report only.**
 
-Example: "a file referenced in `context.md` does not exist" is perfectly mechanical to detect, but **the fix is not unique** — delete the reference, or create the file that should have existed? audit cannot know, so it can only report.
+Example: "a file referenced in `context.md` does not exist" is perfectly mechanical to detect, but **the fix is not unique** — delete the reference, or create the file that should have existed? The script cannot know, so it only reports.
 
-**Across every check here, the only one it can fix directly is ADR renumbering.**
+**Across everything the script finds, the only one you may fix directly is ADR renumbering.**
 
-### Scope
+Two categories in its output are **lists, not errors** — read them, do not try to fix them:
 
-Groups 0 and 3 only mean something for **package projects** (ones with `skills/` or `hooks/`). In ordinary product repos those directories do not exist and the checks skip naturally — **do not error out over it, and do not report it as a gap**.
+- `skill-kinds` — classifies every skill as command or auto-triggering. Which one is correct requires reading the content; the script only lists
+- `revisit-when` — every forward-looking clause in the devlog. Whether one has fired is not mechanically decidable
 
-### Group 0 · Liveness (what the hook cannot reach itself)
+**Three findings are expected, not bugs**: a lesson that cites a package name is a record rather than a dependency; a pointer like "trade-off: see ADR-011" is a pointer, not misplaced content; and a check that names other packages will match itself. A keyword check cannot separate "mentions" from "depends on" — that is this class of check's ceiling, which is why it reports rather than fixes.
 
-Hook errors are **entirely silent** — a first-layer hard constraint: injection is a bonus, not a precondition, and must never block a session. The cost is that a crashed hook, or one that was never invoked, produces no signal at all. So it gets checked here:
+### 3. The half no script can do — this is where you actually work
 
-```bash
-node hooks/inject-context.js >/dev/null 2>&1 || echo "hook script failed to execute"
-# Classify per ADR-009 — list both kinds, since which is which cannot be determined mechanically
-for f in skills/*/SKILL.md; do
-  grep -q 'disable-model-invocation: true' "$f" \
-    && echo "command: $f" \
-    || echo "skill (auto-trigger): $f — verify it states constraints, not evaluations"
-done
-```
+The script compares **documents against documents and documents against git**. It never opens the implementation. So these are yours, and they are where the real drift lives:
 
-The second check exists for ADR-009, and **both kinds must be listed**: drop the field and an evaluation-style command silently becomes an auto-triggering skill, exactly the noise source that ADR warns about. But a pure-constraint skill **is supposed to lack** the field. **Telling them apart requires reading the content**, which no mechanical check can do — so it lists without judging.
+| Judgement pass | What to actually do |
+|---|---|
+| **Documentation vs implementation** | Read `hooks/` and `skills/` and check them against every behavioural claim in `design.md` and the README. Injected content, trigger conditions, promised silence, component counts — a claim that describes a mechanism nobody built looks exactly like a true one from inside the docs |
+| **Is each description still true** | Project identity, module responsibilities, whether an ADR's conclusion has been overtaken by later practice |
+| **Structural gotchas** | Whether a long-recorded gotcha still applies — not mechanically decidable, so raise the ones you doubt |
+| **Roadmap phases** | Whether an entry landed in the right phase. Its pointers can all resolve while the entry sits under the wrong heading |
 
-**Whether injection is actually running, audit cannot check.** The first command only proves the script executes; it cannot prove Claude Code invoked it. That is the "detecting that config exists is easy, detecting that config works is hard" class of problem. The real signal is **whether you see `<groundwork-context>` when a session opens**: once you are used to having it, its absence is the alarm.
+This section was once ruled out entirely on the grounds that evaluation does not belong in a skill. That reasoning holds for **auto-triggering** skills, where it becomes noise. audit is a command: running it *is* the request for this. But the report **must mark this section as judgement rather than fact, needing your verification**, and must never auto-fix.
 
-### Group 1 · Form
-
-```bash
-# Dead links
-grep -o '`[^`]*\.md`' docs/context.md | tr -d '`' | sort -u | while read f; do
-  [ -e "$f" ] || echo "dead link: $f"
-done
-
-# Are all active plan documents registered in context.md — missed once in practice
-for f in docs/plans/*.md; do
-  [ -e "$f" ] && { grep -q "$(basename "$f")" docs/context.md || echo "unregistered: $f"; }
-done
-
-# ADR numbering gaps or duplicates — the only directly fixable check
-grep -o '^## ADR-[0-9]*' docs/devlog.md | sed 's/.*ADR-//' |
-  awk '{if($1+0!=NR) print "numbering breaks at entry "NR": " $1}'
-
-# Do the commits cited in devlog actually exist
-grep -o '`[0-9a-f]\{7\}`' docs/devlog.md | tr -d '`' | sort -u | while read h; do
-  git cat-file -e "$h^{commit}" 2>/dev/null || echo "commit missing: $h"
-done
-
-# Do cross-file section references point at real sections — missed once in practice
-grep -rho 'S[0-9]\.[0-9]' docs/ skills/ 2>/dev/null | sort -u | while read ref; do
-  grep -q "^### ${ref#S}" docs/design.md || echo "broken section reference: $ref"
-done
-
-# Translated README pairs drifting apart — only meaningful if a translation exists
-for tr in README.*.md; do
-  [ -e "$tr" ] || continue
-  a=$(grep -c '^## ' README.md); b=$(grep -c '^## ' "$tr")
-  [ "$a" = "$b" ] || echo "README sections out of sync: README.md=$a $tr=$b"
-done
-
-# Skill translations drifting from their source, or pointing at a skill that no longer exists
-for zh in docs/skills-zh/*.md; do
-  [ -e "$zh" ] || continue
-  en="skills/$(basename "$zh" .md)/SKILL.md"
-  [ -e "$en" ] || { echo "orphan translation: $zh"; continue; }
-  a=$(grep -c '^## ' "$en"); b=$(grep -c '^## ' "$zh")
-  [ "$a" = "$b" ] || echo "translation sections out of sync: $en=$a $zh=$b"
-done
-```
-
-**What the translation check can and cannot catch**: section counts catch **structural** drift only. Reword a paragraph without touching a heading and the check still passes. That is the inherent ceiling of this class of check — the English file stays the single source of truth precisely because a stale translation can only mislead a human, never change what runs.
-
-The last two **were both missed in practice on this project**, not hypothetical checks. Cross-file references especially: a broken reference inside one file is visible while editing, across files it is invisible without grep.
-
-### Group 2 · Placement (content in the wrong file)
-
-```bash
-# context.md hand-writing what the hook collects — an explicit rule violation, not a matter of taste
-grep -nEi '^(branch|tech stack|uncommitted|recent commit)' docs/context.md
-
-# Architectural signals: not errors, signals
-[ $(wc -l < docs/context.md) -gt 60 ] && echo "context.md is getting large, check for content that belongs in design.md"
-
-# Content in the wrong file
-grep -nEi 'options considered|trade-off|revisit when' docs/design.md
-grep -nEi 'current state|todo|not started|next up' docs/devlog.md
-```
-
-The first of those two greps looks for ADR markers that probably belong in devlog; the second looks for status text, since ADRs record decisions rather than status.
-
-**This project got burned twice**: `design.md` and `devlog.md` grown together, and a list of pending changes that was really a task backlog sitting in design.md. Both were caught by a human, not by a check.
-
-### Group 3 · Rule violations
-
-```bash
-# No dependency on any external plugin
-grep -rn 'ponytail\|karpathy\|glassbox' hooks/ skills/ 2>/dev/null
-```
-
-**Needs a human**: recording why some package was not used, inside `devlog.md`, is normal; referencing it in **execution logic** is the violation. No mechanical check separates those, so it reports only.
-
-**Three known false positives** (all hit on the first real run, do not re-adjudicate them):
-- **The check itself** — the regex in this section names those plugins, so audit flags itself. Self-referential and unfixable, since excluding this file would hide real violations
-- **Lesson citations** — a recorded lesson is a record, not a dependency
-- **Pointers to ADRs** — a line like "trade-off: see ADR-011" matches the ADR-marker check, but it is a pointer; the content lives in devlog
-
-**Common thread: a keyword check cannot distinguish "mentions" from "depends on."** That is the inherent precision ceiling of this class of check, not a bug — which is why it lives under report-only rather than fix-directly.
-
-Same category: evaluation words in a skill file (recommend, you should consider, perhaps) may violate the ADR-009 rule that skills state constraints and never evaluations.
-
-### Group 4 · Staleness
-
-```bash
-# Collect the Revisit When clauses — list them, do not judge them
-grep -A1 'Revisit When' docs/devlog.md
-
-# Zombie tasks
-git log -1 --format='%cr' -- docs/plans/ 2>/dev/null
-```
-
-**Revisit When is the field most likely to become dead text in an ADR**: every other field is retrospective, recording why something was chosen; only this one is prospective, recording when it should change. Once written nobody looks at it again, so unless something sweeps for it, it may as well not exist. Listing it costs essentially nothing.
-
-Structural gotchas have the same staleness problem — whether a long-recorded gotcha still applies **cannot be determined mechanically**, so it gets listed for the user.
-
-### Group 5 · Content plausibility (report only, marked as judgement)
-
-Whether descriptions are still accurate, whether module responsibilities are right, whether the conclusion of an ADR has been overtaken by later practice.
-
-**This group was once ruled off-limits entirely, which was wrong**: ADR-009 says evaluation content should not be a *skill*, because auto-triggering turns it into noise. As a command it is fine, because the user asked for it. **audit is a command**, and running it is asking for exactly this.
-
-But the report **must mark this section as judgement rather than fact, needing the user to verify it**, and must never auto-fix.
 
 ### Output shape
 
@@ -411,11 +326,11 @@ The report has four sections, and **the fourth is not optional**:
 3. **Signals** — not errors, architectural health indicators (size, gotcha count, module table growth)
 4. **What was not checked this run**
 
-Section 4 is the important one: audit misses far more than it catches. Without it, an all-clear gives **false confidence** — precisely the shape of the lesson recorded in ADR-008: **a check that does not state what it checked is more dangerous than no check at all.**
+Section 4 is the important one: audit misses far more than it catches. Without it, an all-clear gives **false confidence** — **a check that does not state what it checked is more dangerous than no check at all.**
 
 ### No auto-triggering
 
-Having the hook suggest running audit when drift exceeds a threshold was **rejected**: it is the same shape as the onboarding-suggestion component removed in ADR-008, a thing prompting you about itself, and the cost of a missed audit is only that problems accumulate for a while, not immediate breakage. Run it when you want it.
+Having the hook suggest running audit when drift exceeds a threshold was **rejected**: that is a tool prompting you about itself, the exact noise this pack refuses to make, and the cost of a missed audit is only that problems accumulate for a while, not immediate breakage. Run it when you want it.
 
 ---
 

@@ -29,6 +29,8 @@ So the goal isn't clean code. It's **cutting the codebase into pieces that each 
 | **Law of Demeter** | "How many dots are on this line?" | `a.getB().getC().doD()` reaching through three layers |
 | **Dependency inversion** | "Swap this concrete implementation out — does the high-level code change?" | `new MySQLClient()` sitting in business logic |
 
+**One-way dependencies is the only one of the five a tool can settle outright** — it asks "can it" rather than "is it good", and has no grey zone. If the project already carries a dependency analyser (`madge`, `dependency-cruiser`, `pydeps`), run it and trust its output over your own reading: tracing a full dependency chain by eye is precisely what fails in a large codebase, and using an unreliable reading to check for tangles is self-defeating. With no such tool present, fall back to asking the question.
+
 Failing all five doesn't automatically mean rewrite — **ask what the fix costs first**. Foundation work (directory layout, top-level modules, call direction) is worth being strict about because it's expensive to change later. Adding one feature inside an established skeleton is not worth overturning it.
 
 ## Side-effect boundaries: a module doesn't reach across and mutate someone else's state

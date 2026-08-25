@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "groundwork",
-  "description": "An AI development discipline pack for coding agents.",
+  "description": "A human-AI collaboration discipline pack for coding agents.",
   "owner": {
     "name": "Akrevis"
   },
   "plugins": [
     {
       "name": "groundwork",
-      "description": "Stops AI hallucination in large codebases: no invented APIs, files or functions; no breaking code it never fully read; always aware of where the project stands.",
+      "description": "Cuts down AI hallucination in large projects: the real project state is in context before the first token, so there is less left for the model to invent. The injection and docs layers need nothing but git and markdown.",
       "source": "./",
       "category": "productivity"
     }

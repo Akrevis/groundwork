@@ -126,6 +126,7 @@ function detectStack(root) {
 // template is noise, and a pointer to a missing file is worse.
 function docPointers(root) {
   const items = [
+    ['docs/roadmap.md', 'how it got here'],
     ['docs/design.md', 'architecture'],
     ['docs/devlog.md', 'rationale'],
     ['docs/plans', 'active plans'],
