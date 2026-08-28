@@ -79,6 +79,8 @@ After that:
 | `/groundwork:docs audit` | Periodic check for drift between docs and code |
 | `/groundwork:module-boundaries` | Designing a new module or defining cross-module calls |
 
+`audit` comes in two halves. The mechanical checks ship as **`groundwork-audit`**, a script the plugin puts on your PATH — run it directly in any project to catch dead links, plans created but never registered, translations that have drifted from their source, commits a document cites that no longer exist. Every check reports clean, findings, or **skipped with a reason**, and the report ends with what it could not reach. The half that needs judgement — whether the documentation still describes what the code actually does — is what the command walks you through.
+
 The other two skills (`verify-first`, `change-scope`) trigger on their own; you don't invoke them.
 
 ## Why forced injection instead of a skill

@@ -36,7 +36,10 @@ function git(args, cwd) {
       encoding: 'utf8',
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'ignore'], // discard stderr; a non-git directory should not spam the terminal
-    }).trim();
+      // trimEnd, never trim: `git status --short` marks an unstaged edit with a LEADING
+      // space (" M path"). Stripping it shifts the fixed-width status columns, and the
+      // first file in the list loses a character — "docs/x" gets injected as "ocs/x".
+    }).trimEnd();
   } catch {
     return null; // git missing / not a repo / command failed — all degrade to "this item could not be collected"
   }
@@ -54,7 +57,9 @@ function summarizeStatus(porcelain) {
   const files = porcelain
     .split('\n')
     .filter(Boolean)
-    .map((l) => l.slice(3).trim().replace(/^"|"$/g, ''))
+    // Strip the XY status columns by shape, not by offset: a caller that trimmed the
+    // input would otherwise silently eat the first character of the first path.
+    .map((l) => l.replace(/^\s*\S{1,2}\s+/, '').trim().replace(/^"|"$/g, ''))
     .map((f) => (f.includes(' -> ') ? f.split(' -> ')[1] : f)); // renames take the new path
   if (files.length === 0) return null;
   const noun = files.length === 1 ? 'file' : 'files';

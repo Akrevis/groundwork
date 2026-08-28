@@ -80,6 +80,8 @@ claude plugin install groundwork@groundwork
 | `/groundwork:docs audit` | 定期体检，查文档和代码之间的漂移 |
 | `/groundwork:module-boundaries` | 要设计新模块、定跨模块调用关系时 |
 
+`audit` 分两半。机械检查固化成了 **`groundwork-audit`**——插件会把它放进 PATH，在任何项目里都能直接跑：死链、建了却没登记的计划文档、译文与原文的结构漂移、文档引用了已经不存在的 commit。每条检查会报「通过」「有发现」或**「跳过并说明原因」**，报告末尾还列出它够不到的部分。需要判断的那半——文档描述的行为跟代码还对不对得上——由 command 带着你走。
+
 另外两个 skill（`verify-first`、`change-scope`）自动触发，不用调。
 
 ## 为什么是强制注入，不是 skill

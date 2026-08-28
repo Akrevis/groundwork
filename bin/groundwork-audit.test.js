@@ -51,6 +51,35 @@ t('an empty directory skips every check and gives a reason for each', () => {
   clean(root);
 });
 
+// ---------- frontmatter that voids itself ----------
+// The failure this catches is silent by construction: nothing errors, the skill just
+// loads with no fields at all.
+
+t('skill-frontmatter flags an unquoted value containing a colon-space', () => {
+  const root = tmp();
+  write(root, 'skills/broken/SKILL.md', '---\nname: broken\ndescription: fires when X happens: editing a file\n---\n\nbody\n');
+  const out = findings(root, 'skill-frontmatter');
+  assert.strictEqual(out.length, 1);
+  assert.match(out[0], /description/);
+  clean(root);
+});
+
+t('skill-frontmatter accepts the same value once quoted', () => {
+  const root = tmp();
+  write(root, 'skills/ok/SKILL.md', '---\nname: ok\ndescription: "fires when X happens: editing a file"\n---\n\nbody\n');
+  assert.deepStrictEqual(findings(root, 'skill-frontmatter'), []);
+  clean(root);
+});
+
+t('skill-frontmatter flags a skill with no frontmatter at all', () => {
+  const root = tmp();
+  write(root, 'skills/bare/SKILL.md', '# just a heading\n');
+  const out = findings(root, 'skill-frontmatter');
+  assert.strictEqual(out.length, 1);
+  assert.match(out[0], /no frontmatter/);
+  clean(root);
+});
+
 // ---------- dead links ----------
 
 t('dead-links flags a referenced file that does not exist', () => {

@@ -1,6 +1,6 @@
 ---
 name: change-scope
-description: Scope discipline before editing existing code — change only what the task asks for, read the full call chain first, say so when you couldn't, and look before you delete. Triggers when modifying or removing code that already exists: editing a function, changing config, fixing a bug, deleting code, touching a module you didn't write. Not about whether the code should exist, and not about how to carve up a new module. Does not trigger on brand-new files, building a module from scratch, read-only lookups, or running commands.
+description: "Scope discipline before editing existing code — change only what the task asks for, read the full call chain first, say so when you couldn't, and look before you delete. Triggers when modifying or removing code that already exists: editing a function, changing config, fixing a bug, deleting code, touching a module you didn't write. Not about whether the code should exist, and not about how to carve up a new module. Does not trigger on brand-new files, building a module from scratch, read-only lookups, or running commands."
 ---
 
 # Change Boundaries

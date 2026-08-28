@@ -108,6 +108,42 @@ const CHECKS = [
   },
 
   {
+    id: 'skill-frontmatter',
+    group: 'liveness',
+    title: 'skill frontmatter survives YAML parsing',
+    skip: (c) => (c.dirs('skills').length ? null : 'no skills/ — not a package project'),
+    run(c) {
+      // A frontmatter block that fails to parse does not error at load time — every field
+      // is silently dropped, so an auto-triggering skill ships with no description and can
+      // never fire, and a command loses disable-model-invocation. Nothing downstream
+      // notices, including the skill-kinds check above: it greps the raw text and reports
+      // a field the runtime has already thrown away.
+      const out = [];
+      for (const name of c.dirs('skills')) {
+        const body = c.read(`skills/${name}/SKILL.md`);
+        if (body === null) continue;
+        const block = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+        if (!block) {
+          out.push(`${name}: no frontmatter block — the skill loads with no metadata at all`);
+          continue;
+        }
+        for (const line of block[1].split('\n')) {
+          const kv = line.match(/^([A-Za-z0-9_-]+):[ \t]+(.*)$/);
+          if (!kv) continue;
+          const val = kv[2].trim();
+          if (/^["'[{|>]/.test(val)) continue; // quoted, flow collection or block scalar: safe
+          if (/:[ \t]/.test(val)) {
+            out.push(
+              `${name}: "${kv[1]}" is an unquoted value containing ": " — YAML reads that as a new key and drops the WHOLE block. Wrap the value in double quotes`
+            );
+          }
+        }
+      }
+      return out;
+    },
+  },
+
+  {
     id: 'dead-links',
     group: 'form',
     title: 'files referenced by context.md exist',

@@ -88,6 +88,23 @@ t('output is wrapped in the tag when context.md exists', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// --- summarizeStatus: the caller may hand it a trimmed string ---
+// An unstaged edit is marked with a LEADING space (" M path"). Any caller that trims the
+// porcelain shifts the status columns by one, and an offset-based parse then eats the
+// first character of the first path. The earlier tests all fed ideal porcelain straight
+// in, so nothing covered the string the hook actually receives.
+t('the first path survives whether or not the input was trimmed', () => {
+  const raw = ' M docs/context.md\n M docs/design.md';
+  const want = '2 files — docs/context.md, docs/design.md';
+  assert.strictEqual(summarizeStatus(raw), want);
+  assert.strictEqual(summarizeStatus(raw.trim()), want);
+});
+
+t('every porcelain status shape yields the path, not part of it', () => {
+  const out = summarizeStatus('?? a.js\nMM b.js\n M c.js\nA  d.js\nR  old.js -> e.js');
+  assert.strictEqual(out, '5 files — a.js, b.js, c.js, d.js, e.js');
+});
+
 // --- docPointers: list only files that actually exist ---
 // init does not pre-create design.md or devlog.md, and pointing at a missing file
 // sends the AI on a wasted trip.

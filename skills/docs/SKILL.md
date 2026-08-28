@@ -1,6 +1,6 @@
 ---
 name: docs
-description: groundwork documentation workflow — init (create context.md and plans/), task (open a task: surface assumptions, define done), wrap (sync at session end), audit (consistency check). Manual invocation only; the model will not trigger this on its own.
+description: "groundwork documentation workflow — init (create context.md and plans/), task (open a task: surface assumptions, define done), wrap (sync at session end), audit (consistency check). Manual invocation only; the model will not trigger this on its own."
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git rev-parse:*), Bash(git log:*), Bash(git status:*), Bash(git mv:*), Bash(mkdir:*), Bash(groundwork-audit:*), Bash(node bin/groundwork-audit:*)
 ---
