@@ -1,6 +1,6 @@
 {
   "name": "groundwork",
-  "version": "1.1.1",
+  "version": "2.0.0",
   "description": "Human-AI collaboration discipline for coding agents. Force-injects real project state (docs/context.md + git status) at session start so there is less for the AI to invent, plus a /groundwork:docs workflow to keep that state current. Projects without it stay completely silent.",
   "author": {
     "name": "Akrevis"

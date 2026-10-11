@@ -83,7 +83,7 @@ function summarizeDirs(nameList) {
 
 // Stack: report the ecosystem and runtime version only.
 // "Which dependency counts as the key framework" is a judgement call and cannot be derived —
-// that part is left for context.md to state by hand (§7.6).
+// that part is left for context.md to state by hand (ADR-006, Trade-off).
 function detectStack(root) {
   const out = [];
   const read = (f) => {
@@ -126,19 +126,42 @@ function detectStack(root) {
   return out.length ? out.join(' · ') : null;
 }
 
+function markdownIn(root, dir) {
+  try {
+    return fs
+      .readdirSync(path.join(root, dir), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.md'))
+      .map((e) => e.name.slice(0, -3))
+      .sort();
+  } catch {
+    return []; // directory absent — the normal state until the first task or plan exists
+  }
+}
+
+// Active tasks are read off docs/tasks/, never hand-written into context.md: a hand-kept
+// table is a second copy of the directory listing, and the copy is the one that drifts —
+// a task file created but never registered was invisible to every session of its life.
+function activeTasks(root) {
+  return markdownIn(root, 'docs/tasks');
+}
+
 // The docs/ layout groundwork prescribes is knowledge of the package, so no project
 // needs to restate it in its own files. But list only what actually exists — an empty
-// template is noise, and a pointer to a missing file is worse.
+// template is noise, and a pointer to a missing file is worse. A directory counts as
+// existing only once it holds a document: git does not track empty directories, so an
+// empty one exists on this machine and nowhere else.
 function docPointers(root) {
-  const items = [
-    ['docs/roadmap.md', 'how it got here'],
-    ['docs/design.md', 'architecture'],
-    ['docs/devlog.md', 'rationale'],
-    ['docs/plans', 'active plans'],
-    ['docs/plans/archive', 'completed'],
-  ];
-  const present = items.filter(([p]) => fs.existsSync(path.join(root, p)));
-  return present.length ? present.map(([p, label]) => `${label} → ${p}`).join(' | ') : null;
+  const out = [];
+  const file = (p, label) => {
+    if (fs.existsSync(path.join(root, p))) out.push(`${label} → ${p}`);
+  };
+  file('docs/roadmap.md', 'how it got here');
+  file('docs/design.md', 'design');
+  file('docs/devlog.md', 'rationale');
+  const plans = markdownIn(root, 'docs/plans').length;
+  if (plans) out.push(`under discussion → docs/plans (${plans})`);
+  if (markdownIn(root, 'docs/archive').length) out.push('completed → docs/archive');
+  return out.length ? out.join(' | ') : null;
 }
 
 function stamp() {
@@ -165,6 +188,9 @@ function build(root) {
   const status = git('status --short -uall', root);
   if (status !== null) auto.push(`uncommitted: ${summarizeStatus(status) || 'none'}`);
 
+  const tasks = activeTasks(root);
+  if (tasks.length) auto.push('active tasks (docs/tasks/):\n' + tasks.map((t) => '  ' + t).join('\n'));
+
   const stack = detectStack(root);
   if (stack) auto.push(`stack: ${stack}`);
 
@@ -180,12 +206,17 @@ function build(root) {
   if (auto.length) parts.push(`## Auto-collected (groundwork · ${stamp()})\n${auto.join('\n')}`);
 
   // Drift detection: don't just say "possibly stale", locate it to specific directories
-  // so the AI can judge for itself which parts are untrustworthy
-  const m = ctx.match(/commit\s+([0-9a-f]{7,40})\b/i);
-  if (m) {
-    const behind = git(`rev-list --count ${m[1]}..HEAD`, root);
+  // so the AI can judge for itself which parts are untrustworthy.
+  // The baseline is the last commit that touched context.md, read from git — not a hash
+  // written into the file. A written hash names the commit that contains it, so amend,
+  // rebase or a squash merge replaces the very commit it points at; once that commit is
+  // gone (a fresh clone, or after gc) the lookup fails and the warning switches off
+  // without a word. The last commit touching the file cannot be rewritten out from under it.
+  const base = git('log -1 --format=%h -- docs/context.md', root);
+  if (base) {
+    const behind = git(`rev-list --count ${base}..HEAD`, root);
     if (behind && Number(behind) >= DRIFT_MIN) {
-      const names = git(`diff --name-only ${m[1]} HEAD`, root);
+      const names = git(`diff --name-only ${base} HEAD`, root);
       const dirs = names ? summarizeDirs(names) : '';
       parts.push(
         `## ⚠ context.md may be stale\n${behind} commits behind` +
@@ -218,5 +249,5 @@ if (require.main === module) {
     // never "the user cannot start a session".
   }
 } else {
-  module.exports = { summarizeStatus, summarizeDirs, truncate, detectStack, docPointers, build, STANDING_RULE };
+  module.exports = { summarizeStatus, summarizeDirs, truncate, detectStack, activeTasks, docPointers, build, STANDING_RULE };
 }

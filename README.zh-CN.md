@@ -18,16 +18,19 @@
 ## 结构性的坑
 - 时区一律用 UTC 存，展示层才转——历史数据里混过本地时间，不要相信 created_at 的时区
 
-## Auto-collected (groundwork · 2026-08-23 14:02)
+## Auto-collected (groundwork · 2026-10-11 14:02)
 branch: feat/shift-swap
 uncommitted: 14 files — src/schedule/(9) src/api/(3) tests/(2)
+active tasks (docs/tasks/):
+  2026-10-09-shift-swap
+  2026-10-10-holiday-rules
 stack: Node.js >=20 · pnpm@9
 recent commits:
   a3f9c21 修复跨月排班的边界计算
   ...
 
 ## Where the docs are
-architecture → docs/design.md | rationale → docs/devlog.md
+design → docs/design.md | rationale → docs/devlog.md | under discussion → docs/plans (2)
 
 ## Standing constraint
 Every branch, every check, every rule must name a concrete situation that will really
@@ -44,8 +47,8 @@ that branch is fiction.
 
 | 层 | 机制 | 管什么 | 频率 |
 |---|---|---|---|
-| **一** | SessionStart hook | 项目定位、模块职责、git 状态开场就在上下文里 | 每次会话，强制 |
-| **二** | `/groundwork:docs` | 建档、任务开张、会话收尾、一致性体检 | 你主动调 |
+| **一** | SessionStart hook | 项目定位、模块职责、活跃任务、git 状态开场就在上下文里 | 每次会话，强制 |
+| **二** | `/groundwork:docs` | 建档、把决定变成任务、会话收尾、一致性体检 | 你主动调 |
 | **三** | 两个 skill ＋ 一个 command | 查证纪律、改动边界、模块边界判据 | 按场景 |
 
 同一条规则放错层就会失效或变成负担：「先查项目现状」放第三层是废话（AI 不会在该查的时候想起要查）；「模块边界八条」放第一层是灾难（改个 typo 也被架构判据扫一遍）。
@@ -69,20 +72,42 @@ claude plugin install groundwork@groundwork
 /groundwork:docs init
 ```
 
-它会问四件事（这个项目是什么、不做什么、目录职责、已知的坑），生成 `docs/context.md`。下次会话开场就能看到 `<groundwork-context>`。
+它会问四件事（这个项目是什么、不做什么、目录职责、已知的坑），生成 `docs/context.md` 并提交。如果项目里已经有设计笔记或决策记录，它会先逐个问清每份该归到哪里，再动手。下次会话开场就能看到 `<groundwork-context>`。
 
 之后：
 
 | 命令 | 什么时候 |
 |---|---|
-| `/groundwork:docs task` | 接到一个新任务，动手之前 |
+| `/groundwork:docs task` | 一件工作定下来了，动手之前。它在 `docs/tasks/` 下写一份任务契约，另一个会话拿过去就能执行 |
 | `/groundwork:docs wrap` | 会话收尾，把这次的变化同步回文档 |
 | `/groundwork:docs audit` | 定期体检，查文档和代码之间的漂移 |
 | `/groundwork:module-boundaries` | 要设计新模块、定跨模块调用关系时 |
 
-`audit` 分两半。机械检查固化成了 **`groundwork-audit`**——插件会把它放进 PATH，在任何项目里都能直接跑：死链、建了却没登记的计划文档、译文与原文的结构漂移、文档引用了已经不存在的 commit。每条检查会报「通过」「有发现」或**「跳过并说明原因」**，报告末尾还列出它够不到的部分。需要判断的那半——文档描述的行为跟代码还对不对得上——由 command 带着你走。
+`audit` 分两半。机械检查固化成了 **`groundwork-audit`**——插件会把它放进 PATH，在任何项目里都能直接跑：死链、被 git 忽略或从没提交过的文档、归档了 roadmap 却不知道的任务、译文与原文的结构漂移、文档引用了已经不存在的 commit。每条检查会报「通过」「有发现」或**「跳过并说明原因」**，报告末尾还列出它够不到的部分。需要判断的那半——文档描述的行为跟代码还对不对得上——由 command 带着你走。
 
 另外两个 skill（`verify-first`、`change-scope`）自动触发，不用调。
+
+## 工作怎么在 docs/ 里流转
+
+```
+docs/
+├── context.md    每次会话注入
+├── design.md     核心区（意图，很少改）＋ 阶段区（当前架构）
+├── roadmap.md    项目怎么走到今天——只放指针
+├── devlog.md     决策：有哪些方案、选了哪个、代价是什么
+├── backlog.md    在这个项目里用 groundwork 时，groundwork 本身带来的摩擦
+├── plans/        讨论中的话题
+├── tasks/        已定案的工作，一个任务一份契约
+└── archive/      已完成的任务
+```
+
+只有 `context.md` 是预先创建的。其余的都在第一次真有内容放进去时才出现——空模板是噪音，空目录也到不了任何别人的 clone 里。
+
+一个话题从 `plans/` 开始，讨论期间一直留在那里。`task` 把定下来的话题变成 `tasks/` 里的一份契约：目标、边界、前提、可验证的完成标准，以及交接内容——依赖什么、要改哪些文件、和其他任务共用的文件的核心内容、执行的会话什么情况下必须回来问。合并之后，`wrap` 把它归档并登记进 roadmap。hook 自己读 `docs/tasks/`，所以任务从文件存在的那一刻起，每个会话都看得见。
+
+**并行开发。** 几个任务同时跑时，每个任务一个 worktree。执行任务的会话只写代码和自己那份任务文件，别的一概不碰；共享文档只由 `/groundwork:docs` 写，只在主工作区写，在合并之后写。文档永远不冲突，要合并的只剩代码。
+
+**提交。** docs 的各个命令会提交自己写的东西——按路径暂存，绝不 `git add -A`，从不 push，也绝不提交你手上本来就有改动在进行中的文件。
 
 ## 为什么是强制注入，不是 skill
 
@@ -100,7 +125,7 @@ skill 的触发是概率性的：靠 description 匹配，模型自己判断这�
 2. **维护成本**——越大的文件越没人维护，越不维护越过期
 3. **过期的注入比根本没有更危险**——AI 会拿着错误信息自信地干活，而且不会怀疑，因为它是被强制注入的，看起来就是权威
 
-所以 `docs/context.md` 只装两类东西：**git 推导不出的**，和 **AI 不知道自己缺的**。技术栈、分支、未提交改动、最近 commit 全部由 hook 自动采集，不许手写。
+所以 `docs/context.md` 里的每一条都要过三道检查：**git 推导不出**、**AI 不知道自己缺它**、**对任何 clone 这个仓库的人都成立**。技术栈、分支、未提交改动、最近 commit、活跃任务全部由 hook 自动采集，不许手写。没有行数限制；让这份文件保持小的，是这三道检查。
 
 ## 不做什么
 

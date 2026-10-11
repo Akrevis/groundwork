@@ -15,8 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const CONTEXT_MAX_LINES = 60; // above this, context.md likely holds something design.md should
-const ZOMBIE_DAYS = 30; // a plans/ directory untouched this long is worth a look
+const ZOMBIE_DAYS = 30; // a tasks/ directory untouched this long is worth a look
 
 // ---------- context passed to every check ----------
 
@@ -159,16 +158,25 @@ const CHECKS = [
   },
 
   {
-    id: 'plans-registered',
+    id: 'docs-untracked',
     group: 'form',
-    title: 'active plans appear in context.md',
-    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md'),
+    title: 'every file under docs/ is in git',
+    skip: (c) =>
+      !c.exists('docs') ? 'no docs/' : c.git('rev-parse --git-dir') === null ? 'not a git repo — nothing to compare against' : null,
     run(c) {
-      const body = c.read('docs/context.md') || '';
-      return c
-        .list('docs/plans', '.md')
-        .filter((f) => !body.includes(f))
-        .map((f) => `plan created but never registered in the active task table: docs/plans/${f}`);
+      // A worktree or a clone carries only what git tracks. An ignored file is the silent
+      // case: `git add -A` skips it, the commit reports success, and the file exists on one
+      // machine only. An untracked one is merely not committed yet, but a worktree started
+      // now still will not have it — and parallel sessions read docs/tasks/ from exactly there.
+      const lines = (s) => (s ? s.split('\n').filter(Boolean) : []);
+      return [
+        ...lines(c.git('ls-files --others --ignored --exclude-standard -- docs')).map(
+          (f) => `${f} is ignored by git — git add skips it without a word, and no worktree or clone will have it`
+        ),
+        ...lines(c.git('ls-files --others --exclude-standard -- docs')).map(
+          (f) => `${f} is not committed — a worktree started now will not have it`
+        ),
+      ];
     },
   },
 
@@ -271,14 +279,14 @@ const CHECKS = [
   {
     id: 'roadmap-archived',
     group: 'form',
-    title: 'archived plans reached the roadmap',
+    title: 'archived tasks reached the roadmap',
     skip: (c) => (c.exists('docs/roadmap.md') ? null : 'no docs/roadmap.md — optional file'),
     run(c) {
       const body = c.read('docs/roadmap.md') || '';
       return c
-        .list('docs/plans/archive', '.md')
+        .list('docs/archive', '.md')
         .filter((f) => !body.includes(f))
-        .map((f) => `archived but never added to the roadmap: docs/plans/archive/${f}`);
+        .map((f) => `archived but never added to the roadmap: docs/archive/${f}`);
     },
   },
 
@@ -311,21 +319,17 @@ const CHECKS = [
         if (/^\s*(branch|tech stack|uncommitted|recent commits?)\s*[:：]/i.test(line)) {
           out.push(`line ${i + 1} hand-writes a field the hook collects: ${line.trim()}`);
         }
+        // Both of these were contract before 2.0.0, so every older context.md carries them.
+        // Left in place they are not harmless: the table is a second copy of docs/tasks/
+        // that goes stale, and the hash reads as a baseline nothing uses any more.
+        if (/^#{2,6}\s*(active tasks|当前活跃任务|活跃任务)/i.test(line)) {
+          out.push(`line ${i + 1} hand-writes the active task list — the hook now reads it off docs/tasks/: ${line.trim()}`);
+        }
+        if (/^>.*\bcommit\s+[0-9a-f]{7,40}\b/i.test(line)) {
+          out.push(`line ${i + 1} hand-writes a baseline commit — the hook now takes it from git log; keep the date, drop the hash`);
+        }
       });
       return out;
-    },
-  },
-
-  {
-    id: 'context-size',
-    group: 'placement',
-    title: 'context.md stays small',
-    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md'),
-    run(c) {
-      const n = (c.read('docs/context.md') || '').split('\n').length;
-      return n > CONTEXT_MAX_LINES
-        ? [`context.md is ${n} lines (over ${CONTEXT_MAX_LINES}) — check for content belonging in design.md`]
-        : [];
     },
   },
 
@@ -388,16 +392,16 @@ const CHECKS = [
   },
 
   {
-    id: 'zombie-plans',
+    id: 'zombie-tasks',
     group: 'staleness',
-    title: 'active plans have moved recently',
-    skip: (c) => (c.list('docs/plans', '.md').length ? null : 'no active plans'),
+    title: 'active tasks have moved recently',
+    skip: (c) => (c.list('docs/tasks', '.md').length ? null : 'no active tasks'),
     run(c) {
-      const last = c.git("log -1 --format=%ct -- docs/plans/");
+      const last = c.git("log -1 --format=%ct -- docs/tasks/");
       if (!last) return [];
       const days = Math.floor((Date.now() / 1000 - Number(last)) / 86400);
       return days > ZOMBIE_DAYS
-        ? [`docs/plans/ has not changed in ${days} days — are those tasks still alive?`]
+        ? [`docs/tasks/ has not changed in ${days} days — are those tasks still alive?`]
         : [];
     },
   },
@@ -508,7 +512,7 @@ function render(results, root) {
   );
   lines.push('');
   lines.push('NOT CHECKED HERE — mechanical checks cannot reach these:');
-  lines.push('  · whether the documentation matches the implementation (design.md §7-8)');
+  lines.push('  · whether the documentation matches the implementation (design.md §8)');
   lines.push('  · whether injection is actually running — only that the script executes');
   lines.push('  · whether a roadmap entry landed in the right phase');
   lines.push('  · whether any description is still true (that is the audit command’s judgement pass)');
