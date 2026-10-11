@@ -40,18 +40,18 @@ docs/
   archive/<task>.md     done — and registered in the roadmap
 ```
 
-Friction with groundwork itself takes a side path: `wrap` writes it to `backlog.md`.
+Not every topic becomes work. One that settles as a design decision goes into `design.md` instead, and one that is dropped simply goes — either way it leaves `plans/` (see "plans/<topic>.md — under discussion"). Friction with groundwork itself takes a side path: `wrap` writes it to `backlog.md`.
 
 ### Who reads and writes what
 
 | File | Read by | Written by | Written where |
 |---|---|---|---|
 | `context.md` | the hook, every session | `init` creates it; `wrap` updates it | main worktree |
-| `design.md` | the AI, before changing a module | `wrap` — core zone only alongside an ADR; phase zone when a new phase opens | main worktree |
+| `design.md` | the AI, before changing a module | `wrap` — when a `plans/` topic settles as a design decision; core zone only alongside an ADR; phase zone rewritten when a new phase opens | main worktree |
 | `roadmap.md` | the AI, when it needs the shape of the whole history | `wrap`, when it archives a task | main worktree |
 | `devlog.md` | the AI, before changing architecture | `wrap`, only after the user says yes | main worktree |
 | `backlog.md` | the human, deciding what groundwork should change | `wrap` | main worktree |
-| `plans/<topic>.md` | whoever picks the topic up | `wrap` records and updates; `task` removes it on promotion | main worktree |
+| `plans/<topic>.md` | whoever picks the topic up | `wrap` records, updates, and removes it once it settles into `design.md` or is dropped; `task` removes it on promotion | main worktree |
 | `tasks/<task>.md` | the hook lists it; the executing session reads all of it | `task` creates it; after that, only the session executing it | created in the main worktree; updated wherever it executes |
 | `archive/` | rarely | `wrap` | main worktree |
 
@@ -208,7 +208,17 @@ One topic per file: `docs/plans/<YYYY-MM-DD>-<topic-slug>.md`. A topic may bundl
 
 **The bar for a topic: something actually happened.** A hypothetical problem goes nowhere — writing one down is how fictional problems acquire components.
 
-A topic stays here until it is discussed far enough that `task` can state its goal, boundary, premises and definition of done. **A topic can also end in "no"**: if the reasoning is non-obvious, offer an ADR so it isn't raised again from scratch; otherwise delete the file — git keeps its history.
+**A topic ends one of three ways, and in all three the file leaves `plans/`** — a settled topic left behind reads as still open to every session that follows:
+
+| Ending | What happens |
+|---|---|
+| **It becomes work** | Discussed far enough that `task` can state its goal, boundary, premises and definition of done → `task` promotes it to `tasks/` |
+| **It settles as a design decision** | The answer is a decision, not a piece of work — the usual ending in a project that designs before it codes → once the user confirms it is settled, `wrap` writes the conclusion into `design.md`, in the zone it belongs to, and removes the topic file. A core-zone conclusion goes through the ADR question first. No `design.md` yet → this is its first real content; create it |
+| **It ends in "no"** | Non-obvious reasoning → offer an ADR, so it isn't raised again from scratch; otherwise just remove the file |
+
+git keeps the discussion record in every case.
+
+**Partly settled is not settled.** When some of a topic's questions are decided and others are not, write the decided part into `design.md`, take it off To decide (the discussion record keeps the history), and keep the file until nothing is left open. Removing the file early loses the open remainder; waiting for the last question keeps decided design out of `design.md`.
 
 ## design.md — two zones
 
@@ -218,6 +228,8 @@ A topic stays here until it is discussed far enough that `task` can state its go
 | **Phase** | which roadmap phase it describes; current architecture (layout, data flow); known risks | Rewritten as a whole when a new roadmap phase opens |
 
 Mark the zones visibly: as two top-level parts, or with a zone table at the top when existing section numbers are referenced elsewhere and must not move.
+
+A `plans/` topic that settles as a design decision lands here, in whichever zone it belongs to.
 
 **Not in `design.md`**: pending items (→ `plans/`), decision rationale (→ `devlog.md`), history (→ `roadmap.md`). An architecture document is not a todo list; one that becomes one stops being read as architecture.
 
@@ -429,7 +441,7 @@ Read back through the session and determine:
 - Did you hit a **structural gotcha** that passes the three tests?
 - Were any non-obvious technical decisions made (the options-plus-rationale kind)?
 - Did something come up that the project should do, but not now? → a `plans/` topic
-- Was a `plans/` topic discussed? → its discussion record
+- Was a `plans/` topic discussed? → its discussion record — or, if it settled, step 5
 - Did groundwork itself get in the way? → `backlog.md`
 
 Anything after the mode word in `$ARGUMENTS` is a hint about what mattered, but reading the session still governs.
@@ -443,6 +455,7 @@ Anything after the mode word in `$ARGUMENTS` is a hint about what mattered, but 
 ### 5. Record topics and friction
 
 - A new topic → a new `plans/` file; a discussed topic → a dated line in its discussion record
+- **A topic that settled as a design decision** → **ask first**: whether a topic is settled is a judgement call, exactly like whether a task is done, and a conclusion written into `design.md` reads as decided to every later session. Confirmed → write the conclusion into `design.md`, in the zone it belongs to, then `git rm` the topic file. A core-zone conclusion waits for the ADR question in step 8. A topic that ended in "no" is removed the same way, after the ADR offer. **Only partly settled** → the decided part goes into `design.md` and comes off To decide; the file stays
 - Friction with groundwork → a new entry in `backlog.md`, creating the file with its header on the first entry
 - **Same bar for both: something actually happened.** Nothing qualifies → write nothing, and don't ask
 
@@ -472,7 +485,7 @@ If this session changed a goal, a principle or the boundary, that is a core-zone
 
 ### 8. ADR confirmation (never write one directly)
 
-When step 3, a Write-back block or step 7 surfaces a non-obvious decision, **stop and ask**: "Record an ADR for this? <candidate title + one-line context>"
+When step 3, a settled or dropped topic in step 5, a Write-back block or step 7 surfaces a non-obvious decision, **stop and ask**: "Record an ADR for this? <candidate title + one-line context>"
 
 - User says yes → append to `docs/devlog.md` in the standard format (create the file if absent), including the **landing commit hash**, so decision → implementation stays traceable
 - User says no, or it's a small decision → don't write it

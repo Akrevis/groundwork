@@ -102,7 +102,7 @@ docs/
 
 Only `context.md` is created up front. Everything else appears the first time something real goes into it — an empty template is noise, and an empty directory never reaches anyone else's clone.
 
-A topic starts in `plans/` and stays there while it's being discussed. `task` turns a settled one into a contract in `tasks/`: the goal, the boundary, the premises, a definition of done you can verify, and a handoff — what it depends on, which files it will change, the core content of any file it shares with another task, and when the executing session has to come back and ask. Once it's merged, `wrap` archives it and registers it in the roadmap. The hook reads `docs/tasks/` itself, so a task is visible to every session from the moment it exists.
+A topic starts in `plans/` and stays there while it's being discussed. `task` turns a settled one into a contract in `tasks/`: the goal, the boundary, the premises, a definition of done you can verify, and a handoff — what it depends on, which files it will change, the core content of any file it shares with another task, and when the executing session has to come back and ask. Once it's merged, `wrap` archives it and registers it in the roadmap. A topic that settles as a design decision rather than a piece of work goes into `design.md` instead, and leaves `plans/` just the same. The hook reads `docs/tasks/` itself, so a task is visible to every session from the moment it exists.
 
 **Parallel work.** When tasks run side by side, each gets its own worktree. A session executing a task writes code and its own task file, nothing else; shared documents are written only by `/groundwork:docs`, only in the main worktree, after the merge. The documents never conflict, and code is the only thing left to merge.
 
