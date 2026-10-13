@@ -78,7 +78,7 @@ function summarizeStatus(porcelain) {
 
 function summarizeDirs(nameList) {
   const dirs = [...new Set(nameList.split('\n').filter(Boolean).map(dirOf))];
-  return dirs.slice(0, 8).join(', ') + (dirs.length > 8 ? ` and ${dirs.length} more` : '');
+  return dirs.slice(0, 8).join(', ') + (dirs.length > 8 ? ` and ${dirs.length - 8} more` : '');
 }
 
 // Stack: report the ecosystem and runtime version only.

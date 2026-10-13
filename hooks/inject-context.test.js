@@ -56,6 +56,13 @@ t('drift directories are deduplicated', () => {
   assert.strictEqual(summarizeDirs('a/1.js\na/2.js\nb/3.js'), 'a/, b/');
 });
 
+// "and N more" counts what was left out, not the total. It used to print the total —
+// ten directories came out as "d0/ … d7/ and 10 more", eighteen in all.
+t('directories beyond the first eight are counted as the remainder', () => {
+  const names = Array.from({ length: 10 }, (_, i) => `d${i}/f.js`).join('\n');
+  assert.strictEqual(summarizeDirs(names), 'd0/, d1/, d2/, d3/, d4/, d5/, d6/, d7/ and 2 more');
+});
+
 // --- truncate ---
 t('over-length input is truncated with an ellipsis', () => {
   assert.strictEqual(truncate('abcdef', 4), 'abc…');
