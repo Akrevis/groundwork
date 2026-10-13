@@ -64,6 +64,8 @@ claude plugin install groundwork@groundwork
 
 不需要改 `CLAUDE.md`，不需要改 `settings.json`。卸载就干净。
 
+注入 hook 是一个 Node.js 脚本，所以 PATH 上要有 `node`——Claude Code 本身并不需要它。没有的话会话照常开始，但每次都会显示一条 hook error。
+
 ## 上手
 
 在你的项目里跑：

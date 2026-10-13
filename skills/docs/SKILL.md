@@ -84,7 +84,7 @@ Each template below lists **required blocks**. Two rules govern all of them:
 
 `context.md` exists so the AI understands this project from the first token. **Every entry has to pass all three tests:**
 
-1. **git can't derive it.** Tech stack, module locations, branch, uncommitted changes, recent commits, active tasks and the staleness baseline are all collected by the hook — **never hand-write them here**
+1. **git can't derive it.** Tech stack, branch, uncommitted changes, recent commits, active tasks and the staleness baseline are all collected by the hook — **never hand-write them here**
 2. **The AI doesn't know it's missing it.** Anything it would think to look up when it needed it (architecture detail, full ADR text) gets a pointer, not the content
 3. **It holds for anyone who clones the repo.** A gotcha that exists only on one machine — a shell's quoting rules, a local path, a personal git setting — belongs in that person's user-level memory, not here. The test: *on another machine, after a fresh clone, would this still bite?*
 
@@ -298,7 +298,7 @@ ls -d */                            # top-level directories, to seed the module 
 
 Filter out the obvious non-modules: `node_modules`, `.git`, `dist`, `build`, `target`, `venv`, `__pycache__`, `.venv`, `vendor`.
 
-**Never ask about or write down tech stack, module locations, branch, uncommitted changes, recent commits or active tasks** — the hook collects all of it every session, and writing it into a file only creates drift.
+**Never ask about or write down tech stack, branch, uncommitted changes, recent commits or active tasks** — the hook collects all of it every session, and writing it into a file only creates drift. Directories are the exception: the hook does not list them, so the module table below is where they live.
 
 ### 3. Ask four things (don't guess, don't infer from the README)
 
@@ -448,7 +448,7 @@ Anything after the mode word in `$ARGUMENTS` is a hint about what mattered, but 
 
 ### 4. Update `context.md` directly (no need to confirm item by item)
 
-- **Top-level module table**: only touch it if modules were actually added or removed. **Responsibilities only, never locations** (the hook reads locations itself)
+- **Top-level module table**: only touch it if modules were actually added or removed. **One line of responsibility per module, keyed by its directory** — the hook does not list directories, so the key is where the location lives; the layout inside a module belongs in `design.md`
 - **Structural gotchas**: filter through the three tests and the permanence bar
 - **The date line — never skip it.** Updating it is what marks the file as reviewed and resets the staleness baseline. Skip it and every following session carries a "context.md may be stale" warning; after a few rounds the AI learns to ignore it, and **the whole staleness guard stops working**
 

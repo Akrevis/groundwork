@@ -63,6 +63,8 @@ claude plugin install groundwork@groundwork
 
 No changes to `CLAUDE.md`, none to `settings.json`. Uninstalling leaves nothing behind.
 
+The injection hook is a Node.js script, so `node` has to be on your PATH — Claude Code itself does not need it. Without it, sessions still start, but each one shows a hook error.
+
 ## Getting started
 
 In your project:
