@@ -1,142 +1,147 @@
-[中文](README.zh-CN.md)
-
 # groundwork
 
-A human–AI collaboration discipline pack for coding agents. Treats hallucination in large projects — **inventing APIs and files that don't exist, breaking code it never fully read, losing track of where the project actually stands**.
+给 coding agent 用的人机协作纪律包。治大型项目里的 AI 幻觉——**编造不存在的 API 和文件、改坏没读全的代码、失去对项目全局的把握**。
 
-The discipline runs both ways: the AI verifies before it asserts and stays inside the boundary of what was asked, while you hand it the facts it cannot derive on its own. This pack turns both halves into mechanisms rather than good intentions.
+纪律是双向的：AI 断言之前先查证、只改任务要求的范围；人把 AI 自己推导不出来的事实交给它。这个包把两边都做成机制，而不是良好意愿。
 
-Once installed, the first thing an AI sees in every session is the real state of your project:
+装上之后，每次会话开场，AI 拿到的第一段上下文就是项目的真实状态：
 
 ```
 <groundwork-context>
 # my-project · context
 
-## What this is
-Shift scheduling for small teams.
+## 是什么
+面向中小团队的排班系统。
 
-## Structural gotchas
-- Everything is stored in UTC and converted at the presentation layer. Historical rows
-  contain local timestamps — do not trust the timezone on created_at.
+## 结构性的坑
+- 时区一律用 UTC 存，展示层才转——历史数据里混过本地时间，不要相信 created_at 的时区
 
-## Auto-collected (groundwork · 2026-10-11 14:02)
-branch: feat/shift-swap
-uncommitted: 14 files — src/schedule/(9) src/api/(3) tests/(2)
-active tasks (docs/tasks/):
-  2026-10-09-shift-swap
-  2026-10-10-holiday-rules
-stack: Node.js >=20 · pnpm@9
-recent commits:
-  a3f9c21 fix cross-month boundary in shift calculation
+## 自动采集（groundwork · 2026-10-16 14:02）
+分支：main
+未提交：14 个文件 — src/schedule/(9) src/api/(3) tests/(2)
+待办（按顺序）：
+  01-换班审批（今天动过）
+  02-节假日规则（3 天没动）
+技术栈：Node.js >=20 · pnpm@9
+最近提交：
+  a3f9c21 修复跨月排班的边界计算
   ...
 
-## Where the docs are
-design → docs/design.md | rationale → docs/devlog.md | under discussion → docs/plans (2)
+## 文档在哪
+设计 → docs/design.md | 决策理由 → docs/devlog.md | 待讨论 → docs/plans（2 个，最靠前：5-目录与接口）
 
-## Standing constraint
-Every branch, every check, every rule must name a concrete situation that will really
-happen. Say the triggering situation out loud before writing an `if` — if you cannot,
-that branch is fiction.
+## 常驻约束
+每个分支、每条检查、每条规则，都要说得出一个真会发生的具体场景。
+写 `if` 之前，先把触发它的场景说出来——说不出来，这个分支就是虚构的。
 </groundwork-context>
 ```
 
-**Projects without a `docs/context.md` get no injection at all** — no prompts, no nagging. The two auto-triggering skills carry no such condition: they are plain discipline and hold in any repo, onboarded or not.
+**没有 `docs/context.md` 的项目不会有任何注入**——不提示、不打扰。三个自动触发的 skill 不带这个条件，在任何仓库里都生效。
 
-## Three layers
+## 三层
 
-| Layer | Mechanism | Governs | Frequency |
+| 层 | 机制 | 管什么 | 频率 |
 |---|---|---|---|
-| **1** | SessionStart hook | Project identity, module responsibilities, active tasks, git state — present from the first token | every session, forced |
-| **2** | `/groundwork:docs` | Setup, turning a decision into a task, session wrap-up, consistency audit | you invoke it |
-| **3** | Two skills + one command | Verification discipline, change boundaries, module boundary tests | per situation |
+| **一** | SessionStart hook | 项目定位、模块职责、待办、git 状态开场就在上下文里 | 每次会话，强制 |
+| **二** | `/groundwork:docs` | 建档、把定下来的事写成待办、会话收尾、一致性体检 | 你主动调 |
+| **三** | 三个 skill ＋ 一个命令 | 查证纪律、改动边界、决策顺序、模块边界判据 | 按场景 |
 
-Putting a rule in the wrong layer either kills it or turns it into overhead: "check the current state of the project first" is useless in layer 3 (the AI won't think to check at the moment it should), and "eight module boundary rules" would be a disaster in layer 1 (fixing a typo would drag the whole architecture checklist through the context).
+同一条规则放错层就会失效或变成负担：「先查项目现状」放第三层是废话（AI 不会在该查的时候想起要查）；「模块边界八条」放第一层是灾难（改个错别字也被架构判据扫一遍）。
 
-**Layers 1 and 2 depend on nothing but git and markdown** — `groundwork` itself is a docs-heavy project and runs on them. Layer 3 is code-specific.
-
-## Install
+## 安装
 
 ```bash
 claude plugin marketplace add Akrevis/groundwork
 claude plugin install groundwork@groundwork
 ```
 
-No changes to `CLAUDE.md`, none to `settings.json`. Uninstalling leaves nothing behind.
+不需要改 `CLAUDE.md`，不需要改 `settings.json`。卸载就干净。
 
-The injection hook is a Node.js script, so `node` has to be on your PATH — Claude Code itself does not need it. Without it, sessions still start, but each one shows a hook error.
+注入 hook 是一个 Node.js 脚本，所以 PATH 上要有 `node`——Claude Code 本身并不需要它。没有的话会话照常开始，但每次都会显示一条 hook error。
 
-## Getting started
+## 上手
 
-In your project:
+在项目里跑：
 
 ```
-/groundwork:docs init
+/groundwork:docs 建档
 ```
 
-It asks four things — what this project is, what it doesn't do, what each directory is responsible for, and any known gotchas — then writes `docs/context.md` and commits it. If the project already has design notes or a decision log, it asks where each one belongs before touching anything. The next session opens with `<groundwork-context>` in place.
+它会问四件事（这个项目是什么、不做什么、各目录负责什么、已知的坑），生成 `docs/context.md`；新项目还会把还没定的骨架决策（形态、模块、技术栈、目录与接口、开工顺序）各记成一个待讨论的话题。项目里已经有设计笔记或决策记录的，它会先逐个问清每份该归到哪里，再动手。
 
-After that:
+之后：
 
-| Command | When |
+| 命令 | 什么时候 |
 |---|---|
-| `/groundwork:docs task` | A piece of work is decided, before touching anything. It writes a task contract under `docs/tasks/` that another session can pick up and execute |
-| `/groundwork:docs wrap` | End of session — sync what changed back into the docs |
-| `/groundwork:docs audit` | Periodic check for drift between docs and code |
-| `/groundwork:module-boundaries` | Designing a new module or defining cross-module calls |
+| `/groundwork:docs 待办` | 定下来一件或几件事、留给之后的会话做时。每件写成 `docs/tasks/` 里的一份待办，按开工顺序编号 |
+| `/groundwork:docs 收尾` | 会话结束时，把这次的变化写回文档 |
+| `/groundwork:docs 体检` | 定期查文档的一致性 |
+| `/groundwork:module-boundaries` | 设计新模块、定跨模块调用关系时 |
 
-`audit` comes in two halves. The mechanical checks ship as **`groundwork-audit`**, a script the plugin puts on your PATH — run it directly in any project to catch dead links, documents git ignores or never committed, archived tasks the roadmap never heard of, translations that have drifted from their source, commits a document cites that no longer exist. Every check reports clean, findings, or **skipped with a reason**, and the report ends with what it could not reach. The half that needs judgement — whether the documentation still describes what the code actually does — is what the command walks you through.
+模式关键字中英都认：`建档`／`init`、`待办`／`task`、`收尾`／`wrap`、`体检`／`audit`。
 
-The other two skills (`verify-first`, `change-scope`) trigger on their own; you don't invoke them.
+`体检` 分两半。机械检查固化成了 **`groundwork-audit`**，插件会把它放进 PATH，共 13 条：死链、被 git 忽略或没提交的文档、ADR 编号重复或乱序、引用了已删的 ADR、跨文件的章节引用、skill 的 frontmatter 会不会静默作废等。每条检查报告「通过」「有发现」「出错」或**「跳过并说明原因」**，报告末尾列出它够不到的部分。需要判断的那一半——文档描述的行为和代码还对不对得上——由命令带着你走。
 
-## How work moves through docs/
+三个自动触发的 skill 不用调：
+
+| skill | 什么时候起作用 |
+|---|---|
+| `verify-first` | 要写出版本号、API 参数、文件路径这类会被直接照抄的事实，或要新增工具函数时 |
+| `change-scope` | 要改或删已有代码时；项目有归档背景的，先读、改完同步 |
+| `decision-order` | 讨论项目设计时：按决策顺序走，跑题时点出来、拉回来 |
+
+## docs/ 里放什么
 
 ```
 docs/
-├── context.md    injected every session
-├── design.md     core zone (intent, rarely changes) + phase zone (current architecture)
-├── roadmap.md    how the project got here — pointers only
-├── devlog.md     decisions: the options, the choice, the cost
-├── backlog.md    friction with groundwork itself, met while using it here
-├── plans/        topics under discussion
-├── tasks/        decided work, one contract per task
-└── archive/      finished tasks
+├── context.md    每次会话注入
+├── design.md     核心区（意图，很少改）＋ 阶段区（当前架构）
+├── devlog.md     现在有效的决策：有哪些方案、选了哪个、代价是什么
+├── roadmap.md    阶段表：项目分哪几个阶段走到今天
+├── backlog.md    在这个项目里用 groundwork 时，groundwork 本身带来的摩擦
+├── plans/        还没定的：未决问题、待验证的事、已知缺陷
+├── tasks/        待办：定下来、留给之后的会话去做的
+└── archive/      做完了、结果还在被依赖的任务背景
 ```
 
-Only `context.md` is created up front. Everything else appears the first time something real goes into it — an empty template is noise, and an empty directory never reaches anyone else's clone.
+**工作区里只放现在成立的东西，发生过的交给 git。** 失效的决策从 devlog 删掉；做完的待办，结果以后还会被依赖的才压成一份背景存进 `archive/`，其余直接删。
 
-A topic starts in `plans/` and stays there while it's being discussed. `task` turns a settled one into a contract in `tasks/`: the goal, the boundary, the premises, a definition of done you can verify, and a handoff — what it depends on, which files it will change, the core content of any file it shares with another task, and when the executing session has to come back and ask. Once it's merged, `wrap` archives it and registers it in the roadmap. A topic that settles as a design decision rather than a piece of work goes into `design.md` instead, and leaves `plans/` just the same. The hook reads `docs/tasks/` itself, so a task is visible to every session from the moment it exists.
+只有 `context.md` 和开局话题是预先创建的，其余第一次真有内容时才出现。
 
-**Parallel work.** When tasks run side by side, each gets its own worktree. A session executing a task writes code and its own task file, nothing else; shared documents are written only by `/groundwork:docs`, only in the main worktree, after the merge. The documents never conflict, and code is the only thing left to merge.
+**一件事怎么走。** 冒出来的问题记成 `plans/` 里的话题，文件名以决策层级开头（`3-模块划分.md`），`ls` 出来就是讨论顺序。话题有四种结局：转成待办、定案写进 `design.md`、放弃、顺手做完。定下来留给之后做的，写成 `tasks/` 里的待办（`01-搭目录骨架.md`）：目标、边界、前提、可验证的完成标准、现状、自己拿的主意。当场定、当场做完的事不建文件，commit 就是记录。
 
-**Commits.** The docs commands commit what they write — staged by path, never `git add -A`, never pushed, and never a file that already had changes of yours in flight.
+**决策顺序。** 主旨 → 边界 → 形态 → 模块 → 技术栈 → 目录与接口 → 开工顺序 → 细节。前面没定就去定后面，就是跑题；`decision-order` 会点出来，把跑出去的点记成对应层级的话题，再拉回来。后面的发现推翻了前面的决定，是正常回头，不算跑题。
 
-## Why forced injection instead of a skill
+**提交。** docs 的各个命令会提交自己写的东西——按路径暂存，绝不 `git add -A`，从不 push，也绝不提交你手上本来就在改的文件。
 
-Skill triggering is probabilistic: it matches on a description, the model decides for itself whether to load it, and nothing tells you when it didn't fire.
+## 为什么是强制注入，不是 skill
 
-Hallucination isn't "a condition was met at some moment." It's a **persistent absence of information**. And more importantly: **at the moment a hallucination happens, the AI doesn't know it's hallucinating — that is the definition of hallucination.**
+skill 的触发是概率性的：靠 description 匹配，模型自己判断这次要不要加载，没触发不会有任何提示。
 
-Expecting a skill to fire at the moment the AI is about to invent something means pointing a probabilistic mechanism at a problem the model cannot perceive in itself. So the first layer can only be a hook.
+而幻觉不是「某个时刻触发了某个条件」，是**持续性的信息缺失**。更关键的是：**幻觉发生的那一刻，AI 自己不知道自己在幻觉——这正是幻觉的定义。**
 
-## Why the injected content has to stay small
+指望 skill 在「AI 快要编造了」的时刻被触发，是拿概率性机制去治一个模型自身感知不到的问题。所以第一层只能是 hook。
 
-Not to save tokens. Three reasons, none of which depend on window size:
+## 注入内容为什么必须小
 
-1. **Attention dilution** — recall drops measurably for material in the middle of a long context. Inject 500 lines and the 5 that matter get buried
-2. **Maintenance cost** — the bigger a file gets, the less anyone maintains it, and the less it's maintained the staler it gets
-3. **A stale injection is worse than none** — the AI works confidently off wrong information and never questions it, because it arrived force-injected and therefore looks authoritative
+不是为了省 token。三条与窗口大小无关的理由：
 
-So every entry in `docs/context.md` has to pass three tests: **git can't derive it**, **the AI doesn't know it's missing it**, and **it holds for anyone who clones the repo**. Tech stack, branch, uncommitted changes, recent commits and active tasks are all collected by the hook — never hand-written. There is no line limit; the three tests are what keep the file small.
+1. **注意力稀释**——长上下文中段内容的召回率会显著下降。注入 500 行，真正关键的那 5 行反而被淹没
+2. **维护成本**——越大的文件越没人维护，越不维护越过期
+3. **过期的注入比根本没有更危险**——AI 会拿着错误信息自信地干活，而且不会怀疑，因为它是被强制注入的，看起来就是权威
 
-## What it doesn't do
+所以 `docs/context.md` 里的每一条都要过三道检查：**git 推导不出**、**AI 不知道自己缺它**、**对任何 clone 这个仓库的人都成立**。技术栈、分支、未提交改动、最近提交、待办全部由 hook 自动采集，不许手写。没有行数限制；让这份文件保持小的，是这三道检查。
 
-The line it draws: **it governs the discipline on both sides — what the AI puts out, and what you feed it — and stays out of your own head.**
+## 不做什么
 
-- Doesn't address **whether you understand the code the AI wrote** — that needs you talking the code back to someone, not a rule that takes effect on install
-- Doesn't handle **cross-project personal memory** — this pack is project-scoped only
-- Doesn't provide **tooling** (document conversion, skill management, and so on)
-- Doesn't depend on **any other plugin**
-- **Doesn't evaluate code quality** — anything evaluative is a command you invoke, never an auto-triggering skill
+界线：**管两侧的纪律——AI 输出什么、人喂给它什么——不管人自己脑子里的过程。**
+
+- 不管**用户是否理解 AI 写的代码**——那要真人把代码复述回来，不是装上就生效的规则
+- 不管**跨项目的个人记忆**——本包只管项目级
+- 不做**工具类能力**（文档转换、skill 管理等）
+- 不依赖任何**其他插件**
+- **不做代码质量评价**——评价类内容一律做成命令由你主动要，不做成自动触发的 skill
+- 只供作者自用，不考虑他人的使用场景
 
 ## License
 

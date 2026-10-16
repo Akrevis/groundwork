@@ -1,23 +1,21 @@
 #!/usr/bin/env node
-// groundwork audit — the mechanical half of /groundwork:docs audit.
+// groundwork 体检 —— /groundwork:docs 体检的机械那一半。
 //
-// Detection mechanises; repair usually needs judgement. This script only detects, and
-// never writes. It reports what it found and, just as importantly, what it skipped.
+// 检测可以机械化，修复通常要判断。这个脚本只检测、从不写文件。它报告查到了什么，
+// 也同样要紧地报告跳过了什么。
 //
-//   groundwork-audit            human-readable, aligned columns
-//   groundwork-audit --json     structured, for a caller that wants to organise the report
+//   groundwork-audit            给人读，列对齐
+//   groundwork-audit --json     结构化输出，给想自己整理报告的调用方
 //
-// Hard rule inherited from the hook: a broken check may cost its own finding, never the run.
-// Every check is wrapped, and a check that throws is reported as errored rather than silently
-// passing — a check that fails open is worse than no check at all.
+// 从 hook 继承的硬规矩：一条检查坏了，最多赔上它自己的结果，不能赔上整次运行。
+// 每条检查都包了一层，抛异常的检查报告为「出错」，绝不悄悄算作通过——
+// 坏了却放行的检查，比没有检查更糟。
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const ZOMBIE_DAYS = 30; // a tasks/ directory untouched this long is worth a look
-
-// ---------- context passed to every check ----------
+// ---------- 传给每条检查的上下文 ----------
 
 function makeCtx(root) {
   const abs = (p) => path.join(root, p);
@@ -53,7 +51,8 @@ function makeCtx(root) {
   };
   const git = (args) => {
     try {
-      return execSync(`git ${args}`, {
+      // core.quotepath=false：不然中文文件名会被印成八进制转义，报告里认不出是哪个文件
+      return execSync(`git -c core.quotepath=false ${args}`, {
         cwd: root,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -65,17 +64,17 @@ function makeCtx(root) {
   return { root, abs, exists, read, list, dirs, git };
 }
 
-// ---------- checks ----------
-// Each returns an array of finding strings. Empty array = clean.
-// `skip(ctx)` returning a string means "not applicable here", and the reason is printed —
-// silence about a skipped check is how an all-clear turns into false confidence.
+// ---------- 检查 ----------
+// 每条返回一个发现的字符串数组，空数组表示通过。
+// `skip(ctx)` 返回字符串表示「这里不适用」，并把原因印出来——
+// 对跳过的检查一声不吭，全绿就会变成虚假的信心。
 
 const CHECKS = [
   {
     id: 'hook-runs',
     group: 'liveness',
-    title: 'injection hook executes',
-    skip: (c) => (c.exists('hooks/inject-context.js') ? null : 'no hooks/ — not a package project'),
+    title: '注入 hook 能执行',
+    skip: (c) => (c.exists('hooks/inject-context.js') ? null : '没有 hooks/——不是插件项目'),
     run(c) {
       try {
         execSync(`node "${c.abs('hooks/inject-context.js')}"`, {
@@ -84,7 +83,7 @@ const CHECKS = [
         });
         return [];
       } catch {
-        return ['hooks/inject-context.js exits non-zero'];
+        return ['hooks/inject-context.js 退出码非零'];
       }
     },
   },
@@ -92,16 +91,16 @@ const CHECKS = [
   {
     id: 'skill-kinds',
     group: 'liveness',
-    title: 'skill / command classification (ADR-009)',
-    skip: (c) => (c.dirs('skills').length ? null : 'no skills/ — not a package project'),
+    title: 'skill 与命令的分类（ADR-009）',
+    skip: (c) => (c.dirs('skills').length ? null : '没有 skills/——不是插件项目'),
     run(c) {
-      // Lists both kinds without judging: telling a legitimate constraint-only skill from an
-      // evaluative one that lost its field requires reading the content, which no check can do.
+      // 两类都列、不下判断：区分「合法的纯约束 skill」和「丢了字段的评价类 skill」
+      // 要读内容，没有哪条检查做得到。
       return c.dirs('skills').map((name) => {
         const body = c.read(`skills/${name}/SKILL.md`) || '';
         return /disable-model-invocation:\s*true/.test(body)
-          ? `command: ${name}`
-          : `skill (auto-trigger): ${name} — confirm it states constraints, not evaluations`;
+          ? `命令：${name}`
+          : `自动触发的 skill：${name}——确认它写的是约束，不是评价`;
       });
     },
   },
@@ -109,31 +108,29 @@ const CHECKS = [
   {
     id: 'skill-frontmatter',
     group: 'liveness',
-    title: 'skill frontmatter survives YAML parsing',
-    skip: (c) => (c.dirs('skills').length ? null : 'no skills/ — not a package project'),
+    title: 'skill 的 frontmatter 能通过 YAML 解析',
+    skip: (c) => (c.dirs('skills').length ? null : '没有 skills/——不是插件项目'),
     run(c) {
-      // A frontmatter block that fails to parse does not error at load time — every field
-      // is silently dropped, so an auto-triggering skill ships with no description and can
-      // never fire, and a command loses disable-model-invocation. Nothing downstream
-      // notices, including the skill-kinds check above: it greps the raw text and reports
-      // a field the runtime has already thrown away.
+      // 解析失败的 frontmatter 加载时不报错——所有字段被静默丢弃：自动触发的 skill
+      // 没了 description，永远不会触发；命令丢了 disable-model-invocation。下游谁都
+      // 察觉不到，包括上面的 skill-kinds：它 grep 的是原文，报告的是运行时早已扔掉的字段。
       const out = [];
       for (const name of c.dirs('skills')) {
         const body = c.read(`skills/${name}/SKILL.md`);
         if (body === null) continue;
         const block = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
         if (!block) {
-          out.push(`${name}: no frontmatter block — the skill loads with no metadata at all`);
+          out.push(`${name}：没有 frontmatter 块——这个 skill 加载时一个字段都没有`);
           continue;
         }
         for (const line of block[1].split('\n')) {
           const kv = line.match(/^([A-Za-z0-9_-]+):[ \t]+(.*)$/);
           if (!kv) continue;
           const val = kv[2].trim();
-          if (/^["'[{|>]/.test(val)) continue; // quoted, flow collection or block scalar: safe
+          if (/^["'[{|>]/.test(val)) continue; // 加了引号、流式集合或块标量：安全
           if (/:[ \t]/.test(val)) {
             out.push(
-              `${name}: "${kv[1]}" is an unquoted value containing ": " — YAML reads that as a new key and drops the WHOLE block. Wrap the value in double quotes`
+              `${name}：「${kv[1]}」的值没加引号，里面又有「: 」——YAML 会把它当成新的键，整块 frontmatter 作废。给值加上双引号`
             );
           }
         }
@@ -145,37 +142,33 @@ const CHECKS = [
   {
     id: 'dead-links',
     group: 'form',
-    title: 'files referenced by context.md exist',
-    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md — project not onboarded'),
+    title: 'context.md 引用的文件都存在',
+    skip: (c) => (c.exists('docs/context.md') ? null : '没有 docs/context.md——项目没建档'),
     run(c) {
       const body = c.read('docs/context.md') || '';
       const refs = [...new Set([...body.matchAll(/`([^`\n]*\.md)`/g)].map((m) => m[1]))];
       return refs
-        .filter((r) => !/^[A-Za-z]:\//.test(r) && !r.includes('<')) // absolute paths and placeholders are out of scope
+        .filter((r) => !/^[A-Za-z]:\//.test(r) && !r.includes('<')) // 绝对路径和占位符不管
         .filter((r) => !c.exists(r))
-        .map((r) => `context.md points at a file that does not exist: ${r}`);
+        .map((r) => `context.md 指向一个不存在的文件：${r}`);
     },
   },
 
   {
     id: 'docs-untracked',
     group: 'form',
-    title: 'every file under docs/ is in git',
+    title: 'docs/ 下的文件都在 git 里',
     skip: (c) =>
-      !c.exists('docs') ? 'no docs/' : c.git('rev-parse --git-dir') === null ? 'not a git repo — nothing to compare against' : null,
+      !c.exists('docs') ? '没有 docs/' : c.git('rev-parse --git-dir') === null ? '不是 git 仓库——没有可比的' : null,
     run(c) {
-      // A worktree or a clone carries only what git tracks. An ignored file is the silent
-      // case: `git add -A` skips it, the commit reports success, and the file exists on one
-      // machine only. An untracked one is merely not committed yet, but a worktree started
-      // now still will not have it — and parallel sessions read docs/tasks/ from exactly there.
+      // 别的机器、新的 clone 只拿得到 git 跟踪的东西。被忽略的那种是无声的：
+      // `git add -A` 跳过它，commit 报告成功，文件却只在一台机器上有。
       const lines = (s) => (s ? s.split('\n').filter(Boolean) : []);
       return [
         ...lines(c.git('ls-files --others --ignored --exclude-standard -- docs')).map(
-          (f) => `${f} is ignored by git — git add skips it without a word, and no worktree or clone will have it`
+          (f) => `${f} 被 git 忽略——git add 会一声不响地跳过它，换台机器、重新 clone 都没有`
         ),
-        ...lines(c.git('ls-files --others --exclude-standard -- docs')).map(
-          (f) => `${f} is not committed — a worktree started now will not have it`
-        ),
+        ...lines(c.git('ls-files --others --exclude-standard -- docs')).map((f) => `${f} 还没提交`),
       ];
     },
   },
@@ -183,16 +176,22 @@ const CHECKS = [
   {
     id: 'adr-numbering',
     group: 'form',
-    title: 'ADR numbers run without gaps or repeats',
-    skip: (c) => (c.exists('docs/devlog.md') ? null : 'no docs/devlog.md'),
+    title: 'ADR 编号不重复、按顺序（允许空号）',
+    skip: (c) => (c.exists('docs/devlog.md') ? null : '没有 docs/devlog.md'),
     run(c) {
-      // Keep the raw string: reporting "ADR-3" when the file says "ADR-003" makes the
-      // reader hunt for a heading that does not exist.
+      // 失效的 ADR 整条删掉、留下空号，所以空号不算错。编号是永久 ID，commit message
+      // 里的引用改不了——重排会让它们全部指错，这里也就不提议重排。
+      // 保留原始字符串：文件里写的是「ADR-003」，报告成「ADR-3」会让人去找一个不存在的标题。
       const raw = [...(c.read('docs/devlog.md') || '').matchAll(/^## ADR-(\d+)/gm)].map((m) => m[1]);
       const out = [];
-      raw.forEach((s, i) => {
-        if (Number(s) !== i + 1) out.push(`ADR numbering breaks at entry ${i + 1}: found ADR-${s}`);
-      });
+      const seen = new Set();
+      let prev = null;
+      for (const s of raw) {
+        if (seen.has(Number(s))) out.push(`ADR-${s} 出现了不止一次`);
+        else if (prev !== null && Number(s) < Number(prev)) out.push(`ADR-${s} 排在 ADR-${prev} 后面，顺序乱了`);
+        seen.add(Number(s));
+        prev = s;
+      }
       return out;
     },
   },
@@ -200,28 +199,28 @@ const CHECKS = [
   {
     id: 'devlog-commits',
     group: 'form',
-    title: 'commits cited by devlog still resolve',
-    skip: (c) => (c.exists('docs/devlog.md') ? null : 'no docs/devlog.md'),
+    title: 'devlog 引用的 commit 都还在',
+    skip: (c) => (c.exists('docs/devlog.md') ? null : '没有 docs/devlog.md'),
     run: (c) => citedCommits(c, 'docs/devlog.md', 'devlog'),
   },
 
   {
     id: 'section-refs',
     group: 'form',
-    title: 'cross-file section references resolve',
-    skip: (c) => (c.exists('docs/design.md') ? null : 'no docs/design.md'),
+    title: '跨文件的章节引用都能找到',
+    skip: (c) => (c.exists('docs/design.md') ? null : '没有 docs/design.md'),
     run(c) {
       const design = c.read('docs/design.md') || '';
       const seen = new Set();
       const out = [];
-      for (const dir of ['docs', 'skills']) {
+      for (const dir of ['docs', 'skills', 'hooks']) {
         for (const file of walk(c, dir)) {
           const body = c.read(file) || '';
-          for (const m of body.matchAll(/§(\d+\.\d+)/g)) {
+          for (const m of body.matchAll(/§(\d+(?:\.\d+)?)/g)) {
             if (seen.has(m[1])) continue;
             seen.add(m[1]);
             if (!new RegExp(`^#{2,4} ${m[1].replace('.', '\\.')}[ .]`, 'm').test(design)) {
-              out.push(`§${m[1]} is referenced but design.md has no such section`);
+              out.push(`${file} 引用了 §${m[1]}，design.md 里没有这一节`);
             }
           }
         }
@@ -231,77 +230,21 @@ const CHECKS = [
   },
 
   {
-    id: 'readme-pair',
+    id: 'adr-refs',
     group: 'form',
-    title: 'README translations keep the same section count',
-    skip: (c) => (c.exists('README.md') ? null : 'no README.md'),
+    title: '引用的 ADR 在 devlog 里都还在',
+    skip: (c) => (c.exists('docs/devlog.md') ? null : '没有 docs/devlog.md'),
     run(c) {
-      const base = headings(c.read('README.md'));
-      return c
-        .list('.', '.md')
-        .filter((f) => /^README\..+\.md$/.test(f))
-        .filter((f) => headings(c.read(f)) !== base)
-        .map((f) => `README sections out of sync: README.md=${base} ${f}=${headings(c.read(f))}`);
-    },
-  },
-
-  {
-    id: 'translations',
-    group: 'form',
-    title: 'skill translations exist and match, both directions',
-    skip: (c) => (c.dirs('skills').length ? null : 'no skills/'),
-    run(c) {
-      const out = [];
-      const zhDir = 'docs/skills-zh';
-      if (!c.exists(zhDir)) return out; // no translations at all is a valid state
-      const translated = new Set(c.list(zhDir, '.md').map((f) => f.replace(/\.md$/, '')));
-
-      // forward: a translation whose source is gone
-      for (const name of translated) {
-        if (!c.exists(`skills/${name}/SKILL.md`)) out.push(`orphan translation: ${zhDir}/${name}.md`);
-      }
-      // reverse: a skill nobody translated — the direction the shell version never checked
-      for (const name of c.dirs('skills')) {
-        if (!translated.has(name)) out.push(`skill has no translation: skills/${name}/SKILL.md`);
-      }
-      // structural drift on the pairs that do exist
-      for (const name of translated) {
-        const en = c.read(`skills/${name}/SKILL.md`);
-        if (en === null) continue;
-        const a = headings(en);
-        const b = headings(c.read(`${zhDir}/${name}.md`));
-        if (a !== b) out.push(`translation sections out of sync: ${name} en=${a} zh=${b}`);
-      }
-      return out;
-    },
-  },
-
-  {
-    id: 'roadmap-archived',
-    group: 'form',
-    title: 'archived tasks reached the roadmap',
-    skip: (c) => (c.exists('docs/roadmap.md') ? null : 'no docs/roadmap.md — optional file'),
-    run(c) {
-      const body = c.read('docs/roadmap.md') || '';
-      return c
-        .list('docs/archive', '.md')
-        .filter((f) => !body.includes(f))
-        .map((f) => `archived but never added to the roadmap: docs/archive/${f}`);
-    },
-  },
-
-  {
-    id: 'roadmap-pointers',
-    group: 'form',
-    title: 'roadmap pointers still resolve',
-    skip: (c) => (c.exists('docs/roadmap.md') ? null : 'no docs/roadmap.md — optional file'),
-    run(c) {
-      const out = citedCommits(c, 'docs/roadmap.md', 'roadmap');
+      // 失效的 ADR 会被整条删掉，别处对它的引用就悬空了。devlog 自己不查：新 ADR 在
+      // 背景里写明取代了哪条已删的，是有意为之。
       const devlog = c.read('docs/devlog.md') || '';
-      const adrs = [...new Set([...(c.read('docs/roadmap.md') || '').matchAll(/ADR-(\d{3})/g)].map((m) => m[1]))];
-      for (const n of adrs) {
-        if (!new RegExp(`^## ADR-${n} `, 'm').test(devlog)) {
-          out.push(`roadmap cites ADR-${n}, which devlog.md does not contain`);
+      const files = [...walk(c, 'docs'), ...walk(c, 'skills'), ...walk(c, 'hooks')].filter((f) => f !== 'docs/devlog.md');
+      if (c.exists('README.md')) files.push('README.md');
+      const out = [];
+      for (const file of files) {
+        const cited = [...new Set([...(c.read(file) || '').matchAll(/ADR-(\d{3})/g)].map((m) => m[1]))];
+        for (const n of cited) {
+          if (!new RegExp(`^## ADR-${n} `, 'm').test(devlog)) out.push(`${file} 引用了 ADR-${n}，devlog 里已经没有这一条`);
         }
       }
       return out;
@@ -311,22 +254,21 @@ const CHECKS = [
   {
     id: 'context-handwritten',
     group: 'placement',
-    title: 'context.md does not hand-write what the hook collects',
-    skip: (c) => (c.exists('docs/context.md') ? null : 'no docs/context.md'),
+    title: 'context.md 没有手写 hook 已经采集的东西',
+    skip: (c) => (c.exists('docs/context.md') ? null : '没有 docs/context.md'),
     run(c) {
       const out = [];
       (c.read('docs/context.md') || '').split('\n').forEach((line, i) => {
-        if (/^\s*(branch|tech stack|uncommitted|recent commits?)\s*[:：]/i.test(line)) {
-          out.push(`line ${i + 1} hand-writes a field the hook collects: ${line.trim()}`);
+        if (/^\s*(branch|tech stack|uncommitted|recent commits?|分支|技术栈|未提交|最近提交)\s*[:：]/i.test(line)) {
+          out.push(`第 ${i + 1} 行手写了 hook 会采集的字段：${line.trim()}`);
         }
-        // Both of these were contract before 2.0.0, so every older context.md carries them.
-        // Left in place they are not harmless: the table is a second copy of docs/tasks/
-        // that goes stale, and the hash reads as a baseline nothing uses any more.
-        if (/^#{2,6}\s*(active tasks|当前活跃任务|活跃任务)/i.test(line)) {
-          out.push(`line ${i + 1} hand-writes the active task list — the hook now reads it off docs/tasks/: ${line.trim()}`);
+        // 这两样在 2.0.0 之前是契约，所以每份老 context.md 都带着。留着并非无害：
+        // 那张表是 docs/tasks/ 的第二份拷贝，迟早过期；那个 hash 读起来像基线，却早已没人用。
+        if (/^#{2,6}\s*(active tasks|当前活跃任务|活跃任务|待办)/i.test(line)) {
+          out.push(`第 ${i + 1} 行手写了待办列表——hook 会从 docs/tasks/ 读：${line.trim()}`);
         }
         if (/^>.*\bcommit\s+[0-9a-f]{7,40}\b/i.test(line)) {
-          out.push(`line ${i + 1} hand-writes a baseline commit — the hook now takes it from git log; keep the date, drop the hash`);
+          out.push(`第 ${i + 1} 行手写了基线 commit——hook 从 git log 取；留下日期，删掉 hash`);
         }
       });
       return out;
@@ -336,17 +278,21 @@ const CHECKS = [
   {
     id: 'misplaced-content',
     group: 'placement',
-    title: 'ADR markers in design.md, status text in devlog.md',
-    skip: (c) => (c.exists('docs/design.md') || c.exists('docs/devlog.md') ? null : 'no design.md or devlog.md'),
+    title: 'design.md 里没有 ADR 的标记，devlog.md 里没有进度',
+    skip: (c) => (c.exists('docs/design.md') || c.exists('docs/devlog.md') ? null : '没有 design.md 或 devlog.md'),
     run(c) {
       const out = [];
       const scan = (file, re, label) => {
         (c.read(file) || '').split('\n').forEach((line, i) => {
-          if (re.test(line)) out.push(`${file}:${i + 1} ${label}: ${line.trim().slice(0, 70)}`);
+          if (re.test(line)) out.push(`${file}:${i + 1} ${label}：${line.trim().slice(0, 70)}`);
         });
       };
-      scan('docs/design.md', /候选方案|options considered|revisit when/i, 'ADR marker — probably belongs in devlog');
-      scan('docs/devlog.md', /^\s*[-|]?\s*(todo|not started|next up|当前进度)\b/i, 'status text — ADRs record decisions, not status');
+      scan('docs/design.md', /候选方案|何时重审|options considered|revisit when/i, 'ADR 的标记——可能该放进 devlog');
+      scan(
+        'docs/devlog.md',
+        /^\s*[-|]?\s*(todo|not started|next up)\b|^\s*[-|]?\s*(当前进度|未开始|下一步)/i,
+        '进度文字——ADR 记决策，不记进度'
+      );
       return out;
     },
   },
@@ -354,15 +300,15 @@ const CHECKS = [
   {
     id: 'external-deps',
     group: 'rules',
-    title: 'no dependency on another plugin',
-    skip: (c) => (c.dirs('skills').length || c.exists('hooks') ? null : 'no skills/ or hooks/'),
+    title: '不依赖其他插件',
+    skip: (c) => (c.dirs('skills').length || c.exists('hooks') ? null : '没有 skills/ 或 hooks/'),
     run(c) {
       const out = [];
       const names = /\b(ponytail|karpathy|glassbox|memkeep|teamdocs)\b/i;
       for (const dir of ['hooks', 'skills']) {
         for (const file of walk(c, dir)) {
           (c.read(file) || '').split('\n').forEach((line, i) => {
-            if (names.test(line)) out.push(`${file}:${i + 1} names another package: ${line.trim().slice(0, 70)}`);
+            if (names.test(line)) out.push(`${file}:${i + 1} 提到了别的包：${line.trim().slice(0, 70)}`);
           });
         }
       }
@@ -373,45 +319,26 @@ const CHECKS = [
   {
     id: 'revisit-when',
     group: 'staleness',
-    title: 'Revisit When clauses, listed not judged',
-    skip: (c) => (c.exists('docs/devlog.md') ? null : 'no docs/devlog.md'),
+    title: '何时重审：只列，不判断',
+    skip: (c) => (c.exists('docs/devlog.md') ? null : '没有 docs/devlog.md'),
     run(c) {
-      // The only forward-looking field in an ADR, and the one nobody rereads. Listing is
-      // the whole intervention; whether a clause has fired is not mechanically decidable.
+      // ADR 里唯一往前看的一栏，也是没人回头读的一栏。列出来就是全部的干预；
+      // 它触发了没有，机械判断不了。
+      const label = /\*\*(何时重审|Revisit When)\*\*/;
       const lines = (c.read('docs/devlog.md') || '').split('\n');
       const out = [];
       lines.forEach((line, i) => {
-        if (/\*\*Revisit When\*\*/.test(line)) {
-          const text = line.replace(/.*\*\*Revisit When\*\*[:：]?\s*/, '').trim();
-          const adr = lastAdrBefore(lines, i);
-          out.push(`${adr}: ${text.slice(0, 100) || '(see devlog)'}`);
+        if (label.test(line)) {
+          const text = line.replace(/.*\*\*(何时重审|Revisit When)\*\*[:：]?\s*/, '').trim();
+          out.push(`${lastAdrBefore(lines, i)}：${text.slice(0, 100) || '（见 devlog）'}`);
         }
       });
       return out;
     },
   },
-
-  {
-    id: 'zombie-tasks',
-    group: 'staleness',
-    title: 'active tasks have moved recently',
-    skip: (c) => (c.list('docs/tasks', '.md').length ? null : 'no active tasks'),
-    run(c) {
-      const last = c.git("log -1 --format=%ct -- docs/tasks/");
-      if (!last) return [];
-      const days = Math.floor((Date.now() / 1000 - Number(last)) / 86400);
-      return days > ZOMBIE_DAYS
-        ? [`docs/tasks/ has not changed in ${days} days — are those tasks still alive?`]
-        : [];
-    },
-  },
 ];
 
-// ---------- helpers ----------
-
-function headings(body) {
-  return body === null ? -1 : (body.match(/^## /gm) || []).length;
-}
+// ---------- 辅助函数 ----------
 
 function lastAdrBefore(lines, idx) {
   for (let i = idx; i >= 0; i--) {
@@ -424,13 +351,13 @@ function lastAdrBefore(lines, idx) {
 function citedCommits(c, file, label) {
   const hashes = [...new Set([...(c.read(file) || '').matchAll(/`([0-9a-f]{7,40})`/g)].map((m) => m[1]))];
   if (!hashes.length) return [];
-  if (c.git('rev-parse --git-dir') === null) return []; // not a git repo: cannot judge, do not guess
-  // `cat-file -t`, not `cat-file -e <hash>^{commit}`: on Windows execSync goes through
-  // cmd.exe, where `^` is the escape character, so `^{commit}` silently becomes `{commit}`
-  // and every hash reports missing. Asking for the type needs no shell metacharacter.
+  if (c.git('rev-parse --git-dir') === null) return []; // 不是 git 仓库：判断不了，不猜
+  // 用 `cat-file -t`，不用 `cat-file -e <hash>^{commit}`：Windows 上 execSync 走 cmd.exe，
+  // `^` 是转义符，`^{commit}` 会悄悄变成 `{commit}`，每个 hash 都报不存在。问类型用不到
+  // 任何 shell 元字符。
   return hashes
     .filter((h) => c.git(`cat-file -t ${h}`) !== 'commit')
-    .map((h) => `${label} cites a commit that no longer exists: ${h}`);
+    .map((h) => `${label} 引用的 commit 已经不存在：${h}`);
 }
 
 function walk(c, dir, acc = []) {
@@ -448,7 +375,7 @@ function walk(c, dir, acc = []) {
   return acc;
 }
 
-// ---------- run ----------
+// ---------- 运行 ----------
 
 function audit(root) {
   const c = makeCtx(root);
@@ -465,36 +392,42 @@ function audit(root) {
         findings,
       };
     } catch (err) {
-      // A check that throws must say so. Failing open would report clean.
+      // 抛异常的检查必须说出来。放行的话就成了「通过」。
       return { id: check.id, group: check.group, title: check.title, status: 'errored', findings: [String(err && err.message)] };
     }
   });
 }
 
-const GROUP_ORDER = ['liveness', 'form', 'placement', 'rules', 'staleness'];
-const INFORMATIONAL = new Set(['skill-kinds', 'revisit-when']); // list, never judge
+const GROUPS = [
+  ['liveness', '能不能跑'],
+  ['form', '格式与引用'],
+  ['placement', '放的位置'],
+  ['rules', '包的规矩'],
+  ['staleness', '时效'],
+];
+const INFORMATIONAL = new Set(['skill-kinds', 'revisit-when']); // 只列，不判断
 
 function render(results, root) {
   const pad = Math.max(...results.map((r) => r.id.length));
-  const lines = [`groundwork audit · ${root}`, ''];
+  const lines = [`groundwork 体检 · ${root}`, ''];
 
-  for (const group of GROUP_ORDER) {
+  for (const [group, label] of GROUPS) {
     const rows = results.filter((r) => r.group === group);
     if (!rows.length) continue;
-    lines.push(group.toUpperCase());
+    lines.push(label);
     for (const r of rows) {
-      const mark = { clean: '  ok', findings: '  !!', skipped: '   -', errored: ' ERR' }[r.status];
+      const mark = { clean: '通过', findings: '发现', skipped: '跳过', errored: '出错' }[r.status];
       const note =
         r.status === 'skipped'
           ? r.reason
           : r.status === 'clean'
             ? r.title
             : INFORMATIONAL.has(r.id)
-              ? `${r.findings.length} listed — read them, they are not errors`
-              : `${r.findings.length} finding(s)`;
-      lines.push(`${mark} ${r.id.padEnd(pad)}  ${note}`);
+              ? `列出 ${r.findings.length} 项——读一遍，它们不是错误`
+              : `${r.findings.length} 条发现`;
+      lines.push(`  ${mark} ${r.id.padEnd(pad)}  ${note}`);
       if (r.status === 'findings' || r.status === 'errored') {
-        for (const f of r.findings) lines.push(`${' '.repeat(pad + 7)}${f}`);
+        for (const f of r.findings) lines.push(`${' '.repeat(pad + 9)}${f}`);
       }
     }
     lines.push('');
@@ -506,16 +439,16 @@ function render(results, root) {
   const errored = results.filter((r) => r.status === 'errored');
 
   lines.push(
-    `${total} finding(s) across ${results.length - skipped.length} checks` +
-      (skipped.length ? ` · ${skipped.length} skipped` : '') +
-      (errored.length ? ` · ${errored.length} ERRORED` : '')
+    `共 ${total} 条发现，跑了 ${results.length - skipped.length} 条检查` +
+      (skipped.length ? ` · 跳过 ${skipped.length} 条` : '') +
+      (errored.length ? ` · ${errored.length} 条出错` : '')
   );
   lines.push('');
-  lines.push('NOT CHECKED HERE — mechanical checks cannot reach these:');
-  lines.push('  · whether the documentation matches the implementation (design.md §8)');
-  lines.push('  · whether injection is actually running — only that the script executes');
-  lines.push('  · whether a roadmap entry landed in the right phase');
-  lines.push('  · whether any description is still true (that is the audit command’s judgement pass)');
+  lines.push('这里没查的——机械检查够不到：');
+  lines.push('  · 文档和实现对不对得上（design.md §8）');
+  lines.push('  · 注入是不是真的在跑——这里只查了脚本能执行');
+  lines.push('  · 归档背景和它涉及的代码还对不对得上');
+  lines.push('  · 各处描述是否仍然成立、roadmap 的阶段划分准不准（那是体检命令的判断项）');
   return lines.join('\n');
 }
 
@@ -526,7 +459,7 @@ if (require.main === module) {
   try {
     root = execSync('git rev-parse --show-toplevel', { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || cwd;
   } catch {
-    /* not a git repo — audit what is here */
+    /* 不是 git 仓库——就查眼前这个目录 */
   }
   const results = audit(root);
   if (args.includes('--json')) {
@@ -534,9 +467,8 @@ if (require.main === module) {
   } else {
     process.stdout.write(render(results, root) + '\n');
   }
-  // Exit 0 regardless: this is a report, and a non-zero exit would make it look like a
-  // failed command to whatever ran it.
+  // 不管查到什么都以 0 退出：这是一份报告，非零退出会让调用它的东西以为命令失败了。
   process.exit(0);
 } else {
-  module.exports = { audit, makeCtx, CHECKS, render, headings };
+  module.exports = { audit, makeCtx, CHECKS, render };
 }

@@ -1,72 +1,72 @@
 ---
 name: module-boundaries
-description: Module boundary tests — dependency direction, cohesion, side-effect boundaries, error propagation. Invoke manually when designing a new module, defining cross-module call relationships, laying out directory structure, or introducing a dependency. Outputs judgements only, never edits code. Manual invocation only; the model will not trigger this on its own.
+description: "模块边界判据——依赖方向、内聚、副作用边界、错误穿透。设计新模块、定跨模块调用关系、摆目录结构、引入依赖时手动调用。只输出判断，不改代码。只能手动调用，模型不会自己触发。"
 disable-model-invocation: true
 allowed-tools: Read, Grep, Glob
 ---
 
 # /groundwork:module-boundaries
 
-Governs **how something already committed to gets carved up and wired together**. Whether that code should exist at all is decided by the task itself; scope discipline for editing existing code lives in `change-scope`.
+管**已经确定要写的东西怎么切、怎么连**。这段代码该不该存在，由任务本身定；改动已有代码的范围纪律，见 `change-scope`。
 
-**Outputs judgements, never touches code.** Every test below is a question you can answer on the spot — abstract nouns have no binding force.
+**只输出判断，不动代码。** 判据全部是当场能问出答案的问题——抽象名词没有约束力。
 
-## Boundaries mean something different for AI
+## 边界对 AI 和对人不是一回事
 
-For people, module boundaries are about maintainability. For AI, they decide **how much you have to read to change one thing**.
+人看模块边界，价值是「好维护」。AI 看模块边界，价值是**改一处代码需要读懂多少东西**。
 
-A cohesive module with only inbound dependencies can be read once, after which a change to it is provably local. In a tangled codebase the AI can't read the whole call chain, so it guesses — **and a guess is a hallucination**.
+一个高内聚、只被单向依赖的模块，AI 读完这一个就能确信改动没有连带影响。互相缠绕的代码库里，AI 读不全调用链，只能猜——**猜出来的就是幻觉**。
 
-So the goal isn't clean code. It's **cutting the codebase into pieces that each fit in a context window**. Architectural refinements that don't serve that goal are out of scope here.
+所以目标不是「代码整洁」，是**把代码库切成能被单独装进上下文的块**。不服务这个目标的架构讲究，这里一概不管。
 
-## Five basic tests: ask on the spot, don't recite the names
+## 五条基本判据：当场问，别背名词
 
-| Test | Ask it like this | What failure looks like |
+| 判据 | 当场怎么问 | 不合格的样子 |
 |---|---|---|
-| **One-way dependencies** | "A uses B — does B use A?" | Two modules importing each other; three going around in a circle |
-| **Cohesion** | "How many different reasons would force a change here?" | One `utils.js` holding dates, crypto, and HTTP |
-| **Loose coupling** | "Does the caller need to know how I store this internally?" | Callers reaching into an internal structure and walking it themselves |
-| **Law of Demeter** | "How many dots are on this line?" | `a.getB().getC().doD()` reaching through three layers |
-| **Dependency inversion** | "Swap this concrete implementation out — does the high-level code change?" | `new MySQLClient()` sitting in business logic |
+| **单向依赖** | 「A 用 B，那 B 用不用 A？」 | 两个模块互相 import；三个模块转一圈 |
+| **高内聚** | 「这个模块会因为几种不同的原因被改？」 | 一个 `utils.js` 装了日期、加密、HTTP |
+| **低耦合** | 「调用方需要知道我内部怎么存的吗？」 | 调用方拿到内部数据结构自己遍历 |
+| **迪米特** | 「这行有几个点？」 | `a.getB().getC().doD()` 穿透三层 |
+| **依赖倒置** | 「换掉这个具体实现，高层要不要改？」 | 业务逻辑里直接 `new MySQLClient()` |
 
-**One-way dependencies is the only one of the five a tool can settle outright** — it asks "can it" rather than "is it good", and has no grey zone. If the project already carries a dependency analyser (`madge`, `dependency-cruiser`, `pydeps`), run it and trust its output over your own reading: tracing a full dependency chain by eye is precisely what fails in a large codebase, and using an unreliable reading to check for tangles is self-defeating. With no such tool present, fall back to asking the question.
+**五条里只有「单向依赖」能被工具直接判定**——它问的是「能不能」而不是「好不好」，没有灰度。项目里已经有依赖分析工具（`madge`、`dependency-cruiser`、`pydeps`）就跑它，并且信它的结论而不是自己读出来的：大项目里靠眼睛追完整条依赖链恰恰是最容易失手的地方，**拿一个读不可靠的结论去查缠绕，本身就是自指的失败**。没有这类工具时，退回去问那个问题。
 
-Failing all five doesn't automatically mean rewrite — **ask what the fix costs first**. Foundation work (directory layout, top-level modules, call direction) is worth being strict about because it's expensive to change later. Adding one feature inside an established skeleton is not worth overturning it.
+五条都不合格也未必要改——**先问改的代价**。地基阶段（定目录、划顶层模块、定调用方向）值得较真，因为后期改动成本极高；在已定骨架里加一个功能不值得为此推翻重来。
 
-## Side-effect boundaries: a module doesn't reach across and mutate someone else's state
+## 副作用边界：模块不越界改别人的状态
 
-**Rule**: either be pure (read the arguments, return a result, change nothing outside), or **declare in the name or the docs exactly what you mutate**.
+**规则**：要么是纯的（只读入参、返回结果、不改外部任何东西），要么在**名字或文档里明确声明自己会改什么**。
 
-**Ask on the spot**: **What does this function change besides its return value?**
+**当场问**：**这个函数除了返回值以外，还改变了什么？**
 
-If you can't list it, or what you list isn't reflected in the name → there's a hidden side effect.
+列不出来，或者列出来的东西没体现在函数名里 → 有隐藏副作用。
 
-Concretely: a query interface that also bumps an access counter, writes a cache, or logs a row into the database — the caller thinks it just read something, and it actually mutated state. **Separating reads from writes isn't fastidiousness; it's what lets callers predict consequences.**
+具体化：一个查询接口顺手更新了访问计数、写了缓存、往库里记了日志——调用方以为自己只是读了一下，实际改了状态。**读写分离不是洁癖，是让调用方能预测后果。**
 
-**What failure looks like**: `getXxx` / `formatXxx` / `renderXxx` mutating state; calling a query function producing a write; a presentation layer changing business data, firing requests, or writing caches during render.
+**不合格的样子**：`getXxx`／`formatXxx`／`renderXxx` 改了状态；调用一个查询函数产生了写操作；展示层在渲染过程中改业务数据、发请求、写缓存。
 
-## Errors must propagate across boundaries
+## 错误必须穿透边界
 
-**Rule**: no problem-masking tolerance at a boundary. Bad argument → throw. Dependency unavailable → throw.
+**规则**：边界上不许有掩盖问题的容错。参数不对就抛，依赖不可用就抛。
 
-**Ask on the spot**: before writing `try/catch`, `?? default`, or `if (!x) return []` — **am I handling a business case I actually know about, or papering over a situation I'm unsure of?** If it's the second, let it throw.
+**当场问**：写下 `try/catch`、`?? 默认值`、`if (!x) return []` 之前——**这是在处理一个我确知的业务分支，还是在掩盖一个我不确定的情况？** 后者，让它抛。
 
-**Why this matters especially for AI coding**: **when an AI is unsure, adding a fallback is its default way of concealing that uncertainty.** Don't know whether the field can be empty → give it a default. Don't know whether the call can fail → wrap it in try. The result is a hallucination hidden behind a fallback: nothing errors, the output is wrong, and the failure surfaces nowhere near its cause. **Letting it blow up immediately exposes the hallucination at the cheapest possible place.**
+**为什么这条对 AI 编码格外重要**：**AI 不确定的时候，加兜底是它掩盖不确定性的默认手段。** 不知道字段会不会为空就给默认值，不知道调用会不会失败就 try 包起来。结果是幻觉被兜底藏住——代码不报错，跑出来的结果是错的，而且错在离根因十万八千里的地方。**让它当场炸掉，是把幻觉暴露在最便宜的位置。**
 
-The classic shape: **a query returns the same empty array both when there genuinely are no results and when the input doesn't satisfy the index's precondition.** The caller can't tell them apart, so a human has to remember the gotcha — and that memory eventually gets lost. Make the second case throw, and the piece of tribal knowledge stops needing to exist.
+最典型的形态：**一个查询在「真的没有结果」和「输入不满足索引的前提」两种情况下返回同一个空数组**。调用方分不出来，只能靠人记住这个坑——而那份「记住」迟早会丢。让第二种情况报错，那条口口相传的注意事项就不必存在。
 
-**Three cases that genuinely need a fallback**:
+**真正需要兜底的三种情况**：
 
-- The outermost layer (top of an HTTP handler, a main loop) keeping the process alive — **but it must log the complete error**, never swallow it
-- An explicit business rule ("show the username when no nickname is set") — that's business logic, not a fallback; just write it plainly
-- Genuinely optional degradation ("analytics failure doesn't block the main flow") — with an explicit comment saying why failure is acceptable
+- 系统最外层（HTTP handler 顶层、主循环）防止进程整个挂掉——**但必须记录完整错误**，不能静默
+- 明确的业务规则（「用户没填昵称就显示用户名」）——这是业务逻辑，不是兜底，写清楚即可
+- 真正的可选功能降级（「埋点失败不影响主流程」）——要显式注释说明为什么可以失败
 
-**The overall test**: a fallback is "I know this can fail and I know what to do about it," not "I'm not sure whether something will go wrong, let me wrap it just in case."
+**总判据**：兜底是「我知道这里会失败、也知道失败了该怎么办」，不是「我不确定会不会出事、先包起来保平安」。
 
-## How this command fails in practice
+## 这个 command 失效的几种方式
 
-- **Reciting the tests as slogans instead of asking them** — abstract nouns have no binding force; this is the number one failure mode
-- **Inventing an interface for a single implementation in the name of loose coupling** — these tests exist to prevent tangling, not to reserve extension points
-- **Rewriting existing code the moment it fails a test** — report it; scope discipline for edits lives in `change-scope`
-- **Passing off directory depth as modularity** — five levels of nesting that import each other is still one big ball of mud
-- **Running the full battery on a throwaway script** — false positives are how people end up not using this at all
+- **把判据当口号背，不当场问**——抽象名词没有约束力，这是头号失效方式
+- **为了「低耦合」给单一实现造接口**——判据用来防缠绕，不用来预留扩展点
+- **发现已有代码不合格就顺手大改**——报告它，改动范围另有纪律（`change-scope`）
+- **用目录层级深度冒充模块化**——五层嵌套里互相 import 的代码，依然是一个大泥球
+- **对一次性脚本走全套判据**——误触发会让人烦到干脆不用

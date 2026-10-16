@@ -1,52 +1,60 @@
 ---
 name: change-scope
-description: "Scope discipline before editing existing code — change only what the task asks for, read the full call chain first, say so when you couldn't, and look before you delete. Triggers when modifying or removing code that already exists: editing a function, changing config, fixing a bug, deleting code, touching a module you didn't write. Not about whether the code should exist, and not about how to carve up a new module. Does not trigger on brand-new files, building a module from scratch, read-only lookups, or running commands."
+description: "改已有代码之前的范围纪律——只改任务要求的，先读全调用链，读不全就说，删之前先看；项目里有归档背景时先读，改完同步。在修改或删除已经存在的代码时触发：改函数、改配置、修 bug、删代码、动别人写的模块。不管代码该不该存在，也不管新模块怎么切。新建文件、从零写模块、纯查阅、跑命令时不触发。"
 ---
 
-# Change Boundaries
+# 改动的边界
 
-Governs **how existing code gets changed**. Not whether that code should exist, and not how a new module gets carved up.
+管**已经存在的代码怎么改**。不管这段代码该不该写，也不管新模块怎么切。
 
-## Why this matters more for AI than for people
+## 为什么这条对 AI 尤其重要
 
-When a person's change scope runs wide, the cost is "this diff is hard to review." For AI the cost is different: **without the full call chain you can only guess, and a guess is a hallucination** — and at the moment it happens, the AI cannot perceive it.
+人改代码时，范围失控的代价是「diff 难 review」。AI 改代码时代价不同：**读不全调用链就只能猜，猜出来的就是幻觉**——而幻觉发生的那一刻，AI 自己感知不到。
 
-So the four rules below are not tidiness requirements. They are hallucination guards.
+所以下面六条不是整洁性要求，是防幻觉的硬约束。
 
-## 1. Change only what the task explicitly asks for
+## 1. 只改任务明确要求的
 
-Spotted a problem in adjacent code → **write it down and report it, don't fix it in passing**.
+发现相邻代码有问题 → **记下来一并汇报，不顺手改**。
 
-Drive-by refactors, drive-by formatting, drive-by dependency bumps — each one makes "what actually changed here" unreviewable. The user is reviewing one thing, not three things tangled together.
+顺手重构、顺手改格式、顺手升依赖，都会让「这次到底改了什么」变得不可审查。用户要 review 的是一件事，不是三件事混在一起。
 
-**Tension with "fix the root cause"**: fixing a root cause often means editing callers, which collides with this rule. The resolution is **don't widen the scope on your own** — say "the root cause is in X, fixing it touches these 3 call sites" and let the user decide.
+**与「bug 要修到根因」的张力**：修根因常常要改调用方，这与本条冲突。处理方式是**不自己扩范围**——把「根因在 X，修它要动这 3 个调用点」说出来，由用户定改不改。
 
-## 2. Read the full call chain before editing
+## 2. 改之前先读全调用链
 
-Before touching a function / class / config key, **search every reference to it first**.
+要改的函数／类／配置项，**先搜它所有的引用点再动手**。
 
-Editing without reading them is betting that nothing else depends on the current behavior. That bet often wins in a small codebase and always loses in a large one — and large codebases are the entire reason this discipline exists.
+读不全就改，等于赌「没有别处依赖这个行为」。这个赌在小项目里常常赢，在大项目里必输——而大项目正是这套纪律存在的理由。
 
-## 3. Say so when you couldn't read it all
+## 3. 有归档背景的，先读，改完同步
 
-Too many call sites to finish, an unfamiliar module in the way, dynamic dispatch that search can't reach — **say it**.
+项目里有 `docs/archive/` 时，动手前用要改的文件路径在 `docs/archive/` 里搜一遍。命中的就是当初做出这块东西的任务背景，记着它为什么是现在这样：成立的前提、当时的取舍。**先读完再改。**
 
-"Searched X, found 12 references, read 5 of them" is more honest than "confirmed no impact," and more useful: the user can see where the risk sits. The second sentence tells them nothing.
+改完之后，这次改动让背景里哪一条不再成立，就在**同一个 commit 里**改掉那一条。整份背景都不成立了（这块东西被重写或删掉），不要自己删，告诉用户，由他决定删不删。
 
-## 4. Look at the target before deleting or overwriting
+没有 `docs/archive/` 的项目，这一条不起作用。
 
-No exceptions. Read what that file or block actually is, and confirm it has no remaining value, before removing it.
+## 4. 读不全就说读不全
 
-## 5. Check where you are before the first edit
+调用点太多读不完、跨了不熟的模块、动态调用搜不到——**说出来**。
 
-Which branch, and is the working tree clean. One command, before touching anything:
+「我搜了 X，找到 12 处，读了其中 5 处」比「已确认无影响」诚实，也更有用：用户看得出风险在哪，后一句什么信息都不给。
+
+## 5. 删除和覆盖前先看目标是什么
+
+不设例外。删之前先读那个文件／那段代码到底是什么，确认它没有保留价值。
+
+## 6. 第一次编辑之前先确认自己在哪
+
+在哪个分支，工作区干不干净。动任何东西之前，一条命令：
 
 ```bash
 git branch --show-current && git status --short -uall
 ```
 
-**Why this outranks the call chain**: getting the call chain wrong breaks one function. Being on the wrong branch means **an entire batch of edits lands somewhere it was never meant to go** — and nothing looks abnormal while it happens. Every file writes successfully, every test passes, the commit succeeds. It surfaces later, as a missing commit or a mysterious conflict.
+**为什么这条比调用链还优先**：调用链搞错，坏的是一个函数；分支搞错，**是一整批改动落在了根本不该去的地方**——而整个过程没有任何异常信号。文件都写成功，测试都通过，commit 也成功。它要到很久之后才暴露，表现为「某个 commit 不见了」或者一次莫名其妙的冲突。
 
-This is not hypothetical. It happened while writing this rule: four files were edited and committed on a release branch by an author who believed the whole time they were on the development branch, because the branch had been switched between turns and never re-checked.
+这不是假想场景。**它就发生在写这条规则的过程中**：四个文件被改动并提交到了发布分支上，而作者全程以为自己在开发分支——因为分支是在上一轮对话里被切换的，之后没有再确认过。
 
-**Re-check after anything that could have moved you**: a checkout in an earlier turn, a command someone else ran, resuming a session, any gap where you were not the only actor.
+**任何可能让你位置变了的事情之后都要重新确认**：前面某一轮的 checkout、别人跑过的命令、会话 resume、任何你不是唯一操作者的间隙。

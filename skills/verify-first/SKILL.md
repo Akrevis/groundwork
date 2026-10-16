@@ -1,44 +1,44 @@
 ---
 name: verify-first
-description: Verification discipline before writing — check version numbers, API parameters, config keys, file paths and function signatures before asserting them; search the repo for an existing helper before adding a new one. Triggers when about to state a concrete fact the user could copy and use directly, or when about to add a helper / util / utility function. Does not trigger on reasoning, option comparisons, or trade-off judgements — things nobody copies verbatim; does not re-trigger for something already verified in this session.
+description: "写之前的查证纪律——断言版本号、API 参数、配置项、文件路径、函数签名之前先查证；新增工具函数之前先搜仓库里有没有现成的。在即将写出用户会直接复制去用的具体事实，或即将新增 helper／util／工具函数时触发。推理、方案对比、取舍判断这类没人会照抄的内容不触发；本次会话已经查证过的同一件事不重复触发。"
 ---
 
-# Verify Before Asserting
+# 先查证再断言
 
-Governs **whether the concrete facts you write down are true**, and **whether the thing you're about to write already exists in the repo**.
+管**写出来的具体事实是不是真的**，以及**要写的东西仓库里有没有**。
 
-## Why this matters more for AI than for people
+## 为什么这条对 AI 尤其重要
 
-Fabricating an API parameter and genuinely remembering one **feel identical at the moment of generation**. There is no internal signal saying "I'm not actually sure about this one."
+编造一个 API 参数，和真的记得它，在生成的那一刻**是同一种感觉**——没有任何内部信号提示「这条我其实不确定」。
 
-So the rule "look it up when you're unsure" does not work: that uncertainty never surfaces. It has to be replaced by a mechanical test that doesn't depend on self-awareness.
+所以「不确定的时候去查」这条规则不成立：那个不确定感根本不出现。只能换成一条不依赖自我感知的机械判据。
 
-## The test: would the user copy this and use it directly?
+## 判据：用户会不会直接复制去用
 
-Yes → verify it. No → don't bother.
+会 → 必须查。不会 → 不用查。
 
-| Must verify | No need |
+| 必须查 | 不用查 |
 |---|---|
-| Version numbers, API parameter names, config keys, CLI flags | "The idea behind this design is…" |
-| File paths, function signatures, import statements | Option comparisons, trade-off judgements |
-| Shell commands, environment variable names | Ordering calls like "do X before Y" |
+| 版本号、API 参数名、配置项、CLI flag | 「这个设计的思路是……」 |
+| 文件路径、函数签名、导入语句 | 方案对比、取舍判断 |
+| 命令行、环境变量名 | 「先做 X 再做 Y」这类排序判断 |
 
-The test is **would being wrong burn someone directly**, not "is this important."
+判据是**错了会不会直接坑到人**，不是「这条重不重要」。
 
-## 1. Verify concrete facts before asserting them
+## 1. 断言具体事实前先查
 
-Before writing anything from the left column, confirm it actually exists.
+写出上表左列那类东西之前，先验证它真的存在。
 
-Anything checkable locally gets checked locally: read the file, grep, run `<cmd> --help`, look at `package.json` / `go.mod` / the lockfile / an installed implementation of the same thing.
+本地能查的一律本地查：读文件、grep、跑 `<cmd> --help`、看 `package.json`／`go.mod`／lockfile／已装的同类实现。
 
-## 2. Search the repo before adding a utility
+## 2. 新增工具函数之前先搜仓库
 
-Before writing a helper / util / formatting function, **grep for the keyword and a few plausible alternate names**. If the repo already has one, use it.
+要写一个 helper／util／格式化函数之前，**先 grep 关键词和几种相近命名**。仓库里已经有的，用它。
 
-A duplicate isn't just wasted work — it drifts from the original over time, and after that every call site has to first decide which one to use.
+重复造的那一份不只是浪费——它会和原来那份慢慢分叉，之后每个调用点都要先判断该用哪一个。
 
-## 3. Say so when you couldn't find it
+## 3. 查不到就说查不到
 
-Not findable locally and the fact is load-bearing → search online. **Never go online for something available locally**: it's slower, and the answer is often less accurate than the local one (the local copy is the version this project actually runs).
+本地查不到、且这条是关键事实 → 上网查。**本地查得到的绝不上网**：慢，而且答案往往不如本地准（本地那份是这个项目实际在用的版本）。
 
-Not findable online either → **say "I'm not sure, I couldn't find it."** An answer carrying an uncertainty marker is useful. A wrong answer dressed as a certain one is harmful.
+上网也查不到 → **明说「我不确定，没查到」**。带着不确定标记的答案是有用的，伪装成确定的错答案是有害的。

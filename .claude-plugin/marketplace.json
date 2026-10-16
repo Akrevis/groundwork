@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "groundwork",
-  "description": "A human-AI collaboration discipline pack for coding agents.",
+  "description": "给 coding agent 用的人机协作纪律包。",
   "owner": {
     "name": "Akrevis"
   },
   "plugins": [
     {
       "name": "groundwork",
-      "description": "Cuts down AI hallucination in large projects: the real project state is in context before the first token, so there is less left for the model to invent. The injection and docs layers need nothing but git and markdown.",
+      "description": "减少大型项目里的 AI 幻觉：会话开场就把项目的真实状态放进上下文，AI 可编造的余地就少了。注入层和文档层只依赖 git 与 markdown。",
       "source": "./",
       "category": "productivity"
     }

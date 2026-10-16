@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// groundwork audit self-check — `node bin/groundwork-audit.test.js`
-// No framework, no fixtures. Same shape as hooks/inject-context.test.js.
+// groundwork 体检自测 —— `node bin/groundwork-audit.test.js`
+// 不用框架，不用夹具。和 hooks/inject-context.test.js 一个样子。
 
 const assert = require('assert');
 const fs = require('fs');
@@ -16,7 +16,7 @@ const t = (name, fn) => {
   console.log(`  ok ${name}`);
 };
 
-// ---------- fixture helpers ----------
+// ---------- 夹具辅助 ----------
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'gw-audit-'));
 
@@ -38,24 +38,22 @@ const gitRepo = (root) => {
 
 const clean = (root) => fs.rmSync(root, { recursive: true, force: true });
 
-// ---------- skip behaviour ----------
-// A skipped check must say why. Silence about what was not checked is how an all-clear
-// turns into false confidence.
+// ---------- 跳过 ----------
+// 跳过的检查必须说明原因。对没查的东西一声不吭，全绿就变成虚假的信心。
 
-t('an empty directory skips every check and gives a reason for each', () => {
+t('空目录跳过所有检查，每条都给出原因', () => {
   const root = tmp();
   const results = audit(root);
   const skipped = results.filter((r) => r.status === 'skipped');
   assert.strictEqual(skipped.length, results.length);
-  for (const r of skipped) assert.ok(r.reason && r.reason.length > 0, `${r.id} skipped without a reason`);
+  for (const r of skipped) assert.ok(r.reason && r.reason.length > 0, `${r.id} 跳过了却没给原因`);
   clean(root);
 });
 
-// ---------- frontmatter that voids itself ----------
-// The failure this catches is silent by construction: nothing errors, the skill just
-// loads with no fields at all.
+// ---------- 会让自己作废的 frontmatter ----------
+// 它抓的失败天生无声：什么都不报错，skill 只是加载时一个字段都没有。
 
-t('skill-frontmatter flags an unquoted value containing a colon-space', () => {
+t('skill-frontmatter 抓出没加引号、又含「: 」的值', () => {
   const root = tmp();
   write(root, 'skills/broken/SKILL.md', '---\nname: broken\ndescription: fires when X happens: editing a file\n---\n\nbody\n');
   const out = findings(root, 'skill-frontmatter');
@@ -64,144 +62,120 @@ t('skill-frontmatter flags an unquoted value containing a colon-space', () => {
   clean(root);
 });
 
-t('skill-frontmatter accepts the same value once quoted', () => {
+t('同样的值加了引号就放行', () => {
   const root = tmp();
   write(root, 'skills/ok/SKILL.md', '---\nname: ok\ndescription: "fires when X happens: editing a file"\n---\n\nbody\n');
   assert.deepStrictEqual(findings(root, 'skill-frontmatter'), []);
   clean(root);
 });
 
-t('skill-frontmatter flags a skill with no frontmatter at all', () => {
+t('skill-frontmatter 抓出完全没有 frontmatter 的 skill', () => {
   const root = tmp();
-  write(root, 'skills/bare/SKILL.md', '# just a heading\n');
+  write(root, 'skills/bare/SKILL.md', '# 只有标题\n');
   const out = findings(root, 'skill-frontmatter');
   assert.strictEqual(out.length, 1);
-  assert.match(out[0], /no frontmatter/);
+  assert.match(out[0], /没有 frontmatter/);
   clean(root);
 });
 
-// ---------- dead links ----------
+// ---------- 死链 ----------
 
-t('dead-links flags a referenced file that does not exist', () => {
+t('dead-links 抓出引用了却不存在的文件', () => {
   const root = tmp();
-  write(root, 'docs/context.md', '# c\n\nsee `docs/nope.md`\n');
+  write(root, 'docs/context.md', '# c\n\n见 `docs/nope.md`\n');
   const out = findings(root, 'dead-links');
   assert.strictEqual(out.length, 1);
   assert.match(out[0], /docs\/nope\.md/);
   clean(root);
 });
 
-t('dead-links stays quiet when the file is there', () => {
+t('文件在就不报', () => {
   const root = tmp();
-  write(root, 'docs/context.md', '# c\n\nsee `docs/design.md`\n');
+  write(root, 'docs/context.md', '# c\n\n见 `docs/design.md`\n');
   write(root, 'docs/design.md', '# d\n');
   assert.deepStrictEqual(findings(root, 'dead-links'), []);
   clean(root);
 });
 
-// ---------- docs/ files git does not have ----------
-// The ignored case is the one that bites in silence: `git add -A` skips the file, the
-// commit reports success, and the document exists on one machine only.
+// ---------- docs/ 下 git 没有的文件 ----------
+// 被忽略的那种最无声：`git add -A` 跳过它，commit 报告成功，文件只在一台机器上有。
 
-t('docs-untracked flags an ignored file and an uncommitted one, and passes a committed one', () => {
+t('docs-untracked 抓出被忽略的和没提交的，放过已提交的', () => {
   const root = tmp();
   gitRepo(root);
   write(root, '.gitignore', 'docs/secret.md\n');
   write(root, 'docs/kept.md', '# kept\n');
   execSync('git add -A', { cwd: root, stdio: 'ignore' });
   execSync('git -c user.name=t -c user.email=t@example.com commit -q -m kept', { cwd: root, stdio: 'ignore' });
-  write(root, 'docs/secret.md', '# ignored\n');
-  write(root, 'docs/tasks/2026-01-01-new.md', '# not yet committed\n');
+  write(root, 'docs/secret.md', '# 被忽略\n');
+  write(root, 'docs/tasks/01-中文.md', '# 还没提交\n');
   const out = findings(root, 'docs-untracked');
   assert.strictEqual(out.length, 2, out.join('|'));
-  assert.ok(out.some((f) => /docs\/secret\.md is ignored/.test(f)), out.join('|'));
-  assert.ok(out.some((f) => /docs\/tasks\/2026-01-01-new\.md is not committed/.test(f)), out.join('|'));
+  assert.ok(out.some((f) => /docs\/secret\.md 被 git 忽略/.test(f)), out.join('|'));
+  // 中文文件名原样出现，不是八进制转义
+  assert.ok(out.some((f) => /docs\/tasks\/01-中文\.md 还没提交/.test(f)), out.join('|'));
   assert.ok(!out.some((f) => /kept\.md/.test(f)));
   clean(root);
 });
 
-t('docs-untracked skips outside a git repo', () => {
+t('不是 git 仓库时 docs-untracked 跳过', () => {
   const root = tmp();
   write(root, 'docs/context.md', '# c\n');
   assert.strictEqual(find(audit(root), 'docs-untracked').status, 'skipped');
   clean(root);
 });
 
-// ---------- ADR numbering ----------
+// ---------- ADR 编号 ----------
+// 失效的 ADR 整条删掉，空号是正常的；重号和乱序才是错。
 
-t('adr-numbering flags a gap', () => {
+t('adr-numbering 放过空号', () => {
   const root = tmp();
   write(root, 'docs/devlog.md', '## ADR-001 · a\n\n## ADR-003 · c\n');
+  assert.deepStrictEqual(findings(root, 'adr-numbering'), []);
+  clean(root);
+});
+
+t('adr-numbering 抓出重号和乱序', () => {
+  const root = tmp();
+  write(root, 'docs/devlog.md', '## ADR-001 · a\n\n## ADR-004 · d\n\n## ADR-004 · d2\n\n## ADR-002 · b\n');
   const out = findings(root, 'adr-numbering');
-  assert.strictEqual(out.length, 1);
-  assert.match(out[0], /ADR-003/);
+  assert.strictEqual(out.length, 2, out.join('|'));
+  assert.ok(out.some((f) => /ADR-004 出现了不止一次/.test(f)), out.join('|'));
+  assert.ok(out.some((f) => /ADR-002 排在 ADR-004 后面/.test(f)), out.join('|'));
   clean(root);
 });
 
-// ---------- translations, both directions ----------
-// The reverse direction is the one the shell version never had: a new skill with no
-// translation was invisible.
+// ---------- 悬空的 ADR 引用 ----------
 
-t('translations flags a skill that has no translation', () => {
+t('adr-refs 抓出引用了已删 ADR 的文档，devlog 自己的引用不算', () => {
   const root = tmp();
-  write(root, 'skills/alpha/SKILL.md', '## one\n');
-  write(root, 'skills/beta/SKILL.md', '## one\n');
-  write(root, 'docs/skills-zh/alpha.md', '## 一\n');
-  const out = findings(root, 'translations');
-  assert.strictEqual(out.length, 1);
-  assert.match(out[0], /skills\/beta\/SKILL\.md/);
+  write(root, 'docs/devlog.md', '## ADR-003 · c\n\n取代 ADR-002（已删除，原文见 `abc1234`）\n');
+  write(root, 'docs/design.md', '# d\n\n理由见 ADR-002，另见 ADR-003。\n');
+  write(root, 'skills/x/SKILL.md', '---\nname: x\n---\n按 ADR-003。\n');
+  const out = findings(root, 'adr-refs');
+  assert.strictEqual(out.length, 1, out.join('|'));
+  assert.match(out[0], /docs\/design\.md 引用了 ADR-002/);
   clean(root);
 });
 
-t('translations flags an orphan translation', () => {
+// ---------- 章节引用 ----------
+
+t('section-refs 一级、二级节号都查', () => {
   const root = tmp();
-  write(root, 'skills/alpha/SKILL.md', '## one\n');
-  write(root, 'docs/skills-zh/alpha.md', '## 一\n');
-  write(root, 'docs/skills-zh/gone.md', '## 没了\n');
-  const out = findings(root, 'translations');
-  assert.strictEqual(out.length, 1);
-  assert.match(out[0], /orphan translation.*gone\.md/);
+  write(root, 'docs/design.md', '# d\n\n## 4. 架构\n\n### 4.2 契约\n\n## 8. 风险\n');
+  write(root, 'docs/plans/7-x.md', '# x\n\n见 §4.2、§8 和 §7。\n');
+  const out = findings(root, 'section-refs');
+  assert.strictEqual(out.length, 1, out.join('|'));
+  assert.match(out[0], /§7/);
   clean(root);
 });
 
-t('translations flags structural drift on a pair that exists', () => {
-  const root = tmp();
-  write(root, 'skills/alpha/SKILL.md', '## one\n## two\n');
-  write(root, 'docs/skills-zh/alpha.md', '## 一\n');
-  const out = findings(root, 'translations');
-  assert.strictEqual(out.length, 1);
-  assert.match(out[0], /en=2 zh=1/);
-  clean(root);
-});
+// ---------- commit：真正要紧的那次回归 ----------
+// `git cat-file -e <hash>^{commit}` 看着没错、在 shell 里也能过，但 Windows 上 execSync 走
+// cmd.exe，`^` 是转义符——`^{commit}` 变成 `{commit}`，每个 hash 都报不存在。有这条测试，
+// 它才不会无声。
 
-// ---------- roadmap ----------
-
-t('roadmap-archived flags an archived task that never reached the roadmap', () => {
-  const root = tmp();
-  write(root, 'docs/roadmap.md', '# r\n\n- settled X: `archive/2026-01-01-listed.md`\n');
-  write(root, 'docs/archive/2026-01-01-listed.md', '# listed\n');
-  write(root, 'docs/archive/2026-01-02-done.md', '# done\n');
-  const out = findings(root, 'roadmap-archived');
-  assert.strictEqual(out.length, 1);
-  assert.match(out[0], /docs\/archive\/2026-01-02-done\.md/);
-  clean(root);
-});
-
-t('roadmap-pointers flags an ADR the devlog does not contain', () => {
-  const root = tmp();
-  write(root, 'docs/roadmap.md', '# r\n\nsettled by ADR-042\n');
-  write(root, 'docs/devlog.md', '## ADR-001 · a\n');
-  const out = findings(root, 'roadmap-pointers');
-  assert.ok(out.some((f) => /ADR-042/.test(f)), out.join('|'));
-  clean(root);
-});
-
-// ---------- commits: the regression that matters ----------
-// `git cat-file -e <hash>^{commit}` looks correct and passes in a shell, but execSync on
-// Windows goes through cmd.exe where `^` is the escape character — `^{commit}` becomes
-// `{commit}` and every single hash reports missing. This test is why that is not silent.
-
-t('devlog-commits does NOT flag a commit that really exists', () => {
+t('devlog-commits 不报真实存在的 commit', () => {
   const root = tmp();
   const head = gitRepo(root);
   write(root, 'docs/devlog.md', `## ADR-001 · a\n\n**落地**：\`${head}\`\n`);
@@ -209,7 +183,7 @@ t('devlog-commits does NOT flag a commit that really exists', () => {
   clean(root);
 });
 
-t('devlog-commits flags a hash that is not in the repo', () => {
+t('devlog-commits 抓出仓库里没有的 hash', () => {
   const root = tmp();
   gitRepo(root);
   write(root, 'docs/devlog.md', '## ADR-001 · a\n\n**落地**：`abcdef0`\n');
@@ -219,49 +193,65 @@ t('devlog-commits flags a hash that is not in the repo', () => {
   clean(root);
 });
 
-t('devlog-commits judges nothing outside a git repo', () => {
+t('不是 git 仓库时 devlog-commits 什么都不判', () => {
   const root = tmp();
   write(root, 'docs/devlog.md', '## ADR-001 · a\n\n**落地**：`abcdef0`\n');
   assert.deepStrictEqual(findings(root, 'devlog-commits'), []);
   clean(root);
 });
 
-// ---------- placement ----------
+// ---------- 放的位置 ----------
 
-t('context-handwritten flags a field the hook collects', () => {
+t('context-handwritten 抓出 hook 会采集的字段，中英文都认', () => {
   const root = tmp();
-  write(root, 'docs/context.md', '# c\n\nbranch: main\n');
+  write(root, 'docs/context.md', '# c\n\nbranch: main\n分支：main\n');
   const out = findings(root, 'context-handwritten');
-  assert.strictEqual(out.length, 1);
-  assert.match(out[0], /branch/);
+  assert.strictEqual(out.length, 2, out.join('|'));
   clean(root);
 });
 
-// Every context.md written before 2.0.0 carries both of these — they were contract then.
-t('context-handwritten flags a pre-2.0 task table and header hash, in either language', () => {
+// 2.0.0 之前写的 context.md 都带着这两样——那时它们是契约。
+t('context-handwritten 抓出老的任务表、待办节和头部 hash', () => {
   const root = tmp();
   write(
     root,
     'docs/context.md',
-    '# c\n\n> 最后更新：2026-01-01 · commit 0c910cf\n\n## 当前活跃任务\n\n| 任务 | 状态 |\n\n## Active tasks\n'
+    '# c\n\n> 最后更新：2026-01-01 · commit 0c910cf\n\n## 当前活跃任务\n\n| 任务 | 状态 |\n\n## Active tasks\n\n## 待办\n'
   );
   const out = findings(root, 'context-handwritten');
-  assert.strictEqual(out.length, 3, out.join('|'));
-  assert.ok(out.some((f) => /line 3 hand-writes a baseline commit/.test(f)), out.join('|'));
-  assert.strictEqual(out.filter((f) => /active task list/.test(f)).length, 2, out.join('|'));
+  assert.strictEqual(out.length, 4, out.join('|'));
+  assert.ok(out.some((f) => /第 3 行手写了基线 commit/.test(f)), out.join('|'));
+  assert.strictEqual(out.filter((f) => /待办列表/.test(f)).length, 3, out.join('|'));
   clean(root);
 });
 
-t('context-handwritten leaves a date-only header and other headings alone', () => {
+t('只有日期的头部和别的标题不报', () => {
   const root = tmp();
-  write(root, 'docs/context.md', '# c\n\n> Last updated: 2026-01-01\n\n## What this is\nx\n\n## Structural gotchas\n- y\n');
+  write(root, 'docs/context.md', '# c\n\n> 最后更新：2026-01-01\n\n## 是什么\nx\n\n## 结构性的坑\n- y\n');
   assert.deepStrictEqual(findings(root, 'context-handwritten'), []);
   clean(root);
 });
 
-// ---------- a throwing check must not report clean ----------
+t('misplaced-content 抓出 design.md 里的何时重审和 devlog 里的进度', () => {
+  const root = tmp();
+  write(root, 'docs/design.md', '# d\n\n**何时重审**：以后再说\n');
+  write(root, 'docs/devlog.md', '## ADR-001 · a\n\n- 下一步：补测试\n');
+  const out = findings(root, 'misplaced-content');
+  assert.strictEqual(out.length, 2, out.join('|'));
+  clean(root);
+});
 
-t('a check that throws is reported as errored, never as clean', () => {
+t('revisit-when 两种写法都列出来', () => {
+  const root = tmp();
+  write(root, 'docs/devlog.md', '## ADR-001 · a\n\n**何时重审**：用户变多时\n\n## ADR-002 · b\n\n**Revisit When**：never\n');
+  const out = findings(root, 'revisit-when');
+  assert.deepStrictEqual(out, ['ADR-001：用户变多时', 'ADR-002：never']);
+  clean(root);
+});
+
+// ---------- 抛异常的检查不能报通过 ----------
+
+t('抛异常的检查报告为出错，绝不算通过', () => {
   const { CHECKS } = require('./groundwork-audit');
   const victim = CHECKS.find((c) => c.id === 'dead-links');
   const original = victim.run;
@@ -277,4 +267,4 @@ t('a check that throws is reported as errored, never as clean', () => {
   clean(root);
 });
 
-console.log(`\n${n} checks passed`);
+console.log(`\n${n} 项检查通过`);

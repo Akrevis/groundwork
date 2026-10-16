@@ -1,580 +1,282 @@
 ---
 name: docs
-description: "groundwork documentation workflow — init (set up docs/context.md), task (turn a decision into a task contract under docs/tasks/), wrap (sync at session end), audit (consistency check). Manual invocation only; the model will not trigger this on its own."
+description: "groundwork 文档工作流——建档（init，生成 docs/context.md 和开局话题）、待办（task，把定下来的事写成 docs/tasks/ 里的待办）、收尾（wrap，会话结束时把变化写回 docs/）、体检（audit，查文档的一致性）。只能手动调用，模型不会自己触发。"
 disable-model-invocation: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git rev-parse:*), Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git worktree list:*), Bash(git mv:*), Bash(git rm:*), Bash(git add:*), Bash(git commit:*), Bash(mkdir:*), Bash(groundwork-audit:*), Bash(node bin/groundwork-audit:*)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git mv:*), Bash(git rm:*), Bash(git add:*), Bash(git commit:*), Bash(mkdir:*), Bash(groundwork-audit:*), Bash(node bin/groundwork-audit:*)
 ---
 
-# /groundwork:docs — documentation workflow
+# /groundwork:docs —— 文档工作流
 
-Route on the first word of `$ARGUMENTS`. **Missing, or not one of `init` / `task` / `wrap` / `audit` → stop and ask which one, don't guess.**
+## 先选模式
 
-`docs/` is project state shared by the human and the AI, tracked in git. **Only `context.md` is force-injected into every session**; everything else is read on demand. All four modes work on the same layout, the same templates and the same commit rules, so those are defined once, first, and the modes refer back to them.
+调用时跟在命令后面的参数，会以 `ARGUMENTS:` 一行附在本文末尾。看它的第一个词：
 
-## The layout (single source of truth for all four modes)
+| 第一个词 | 模式 | 用 Read 读 |
+|---|---|---|
+| `建档` 或 `init` | 给项目建立文档骨架（每个项目一次） | `${CLAUDE_SKILL_DIR}/init.md` |
+| `待办` 或 `task` | 把定下来的事写成待办 | `${CLAUDE_SKILL_DIR}/task.md` |
+| `收尾` 或 `wrap` | 会话结束时把变化写回文档 | `${CLAUDE_SKILL_DIR}/wrap.md` |
+| `体检` 或 `audit` | 查文档的一致性 | `${CLAUDE_SKILL_DIR}/audit.md` |
+
+**没有参数，或者第一个词不在表里 → 停下问用户要哪个模式，不要猜。** 选定后只读对应的那一份，按里面的步骤做。本文的规则和模板四个模式共用。
+
+## 目录分工
+
+`docs/` 是人和 AI 共享的项目状态，跟着 git 走。**只有 `context.md` 每次会话被强制注入**，其余按需读。**工作区里只放现在成立的东西，发生过的交给 git。**
 
 ```
 docs/
-├── context.md    injected every session: what this is, what it doesn't do, module duties, gotchas
-├── design.md     core zone (intent, rarely changes) + phase zone (current architecture)
-├── roadmap.md    how the project got here: phases, and pointers into everything else
-├── devlog.md     ADRs: the options considered, the choice, the cost
-├── backlog.md    friction with groundwork itself, met while using it here
-├── plans/        topics under discussion, one file per topic
-├── tasks/        decided work, one contract per task — the hook lists these
-└── archive/      finished task files
+├── context.md    每次会话注入：是什么、不做什么、模块职责、结构性的坑
+├── design.md     核心区（意图，很少改）＋ 阶段区（当前架构）
+├── devlog.md     ADR：现在有效的决策
+├── roadmap.md    阶段表：项目分哪几个阶段走到今天
+├── backlog.md    在这个项目里用 groundwork 时，groundwork 本身带来的摩擦
+├── plans/        还没定的：未决问题、待验证的事、已知缺陷
+├── tasks/        待办：定下来、留给之后的会话去做的
+└── archive/      做完了、结果还在被依赖的任务背景
 ```
 
-### How a piece of work moves
+| 什么 | 放哪 |
+|---|---|
+| 成立的决定 | `design.md`（现在是什么样）、`devlog.md`（为什么这样） |
+| 还没定的 | `plans/` |
+| 定了还没做的 | `tasks/` |
+| 做完了、结果还在被依赖的任务背景 | `archive/` |
+| 发生过的 | git。唯一例外是 roadmap 的阶段表：阶段怎么划是判断，git 推不出来 |
+
+**除了 `context.md` 和开局话题，什么都不预建。** 其余文件和目录第一次真有内容时才出现：空模板是噪音，AI 读到空文件不知道该不该填；空目录 git 不跟踪，换台机器就没了。开局话题不算空模板——每一份都写着「这一层还没定」，意思清楚（见 `init.md`）。
+
+## 一件事怎么走
 
 ```
-  something comes up in a session
-        │  wrap records it
-        v
-  plans/<topic>.md      under discussion — stays here until it is settled
-        │  task, in the main worktree
-        v
-  tasks/<task>.md       decided — executed in the main worktree, or in its own worktree
-        │  merged; then wrap, in the main worktree
-        v
-  archive/<task>.md     done — and registered in the roadmap
+冒出来的问题 ─────────────→ plans/<层级>-<名字>.md
+                              │ 定下来，留给之后的会话做
+                              v
+                        tasks/<序号>-<名字>.md
+                              │ 做完
+                              v
+              结果还会被依赖 → archive/ 存一份背景；否则删掉
 ```
 
-Not every topic becomes work. One that settles as a design decision goes into `design.md` instead, and one that is dropped simply goes — either way it leaves `plans/` (see "plans/<topic>.md — under discussion"). Friction with groundwork itself takes a side path: `wrap` writes it to `backlog.md`.
+- **当场定、当场做完的事不建文件**，commit 就是记录
+- 待办有两个来路：`待办` 模式把定下来的事写进去；本次会话开了工、没做完、又没有待办文件的事，由 `收尾` 写进去
+- 讨论的先后按 `decision-order` skill 的八层；话题文件名以层级开头，`docs/plans/` 里文件名最小的就是现在该定的
 
-### Who reads and writes what
+话题有四种结局，四种都离开 `plans/`：
 
-| File | Read by | Written by | Written where |
-|---|---|---|---|
-| `context.md` | the hook, every session | `init` creates it; `wrap` updates it | main worktree |
-| `design.md` | the AI, before changing a module | `wrap` — when a `plans/` topic settles as a design decision; core zone only alongside an ADR; phase zone rewritten when a new phase opens | main worktree |
-| `roadmap.md` | the AI, when it needs the shape of the whole history | `wrap`, when it archives a task | main worktree |
-| `devlog.md` | the AI, before changing architecture | `wrap`, only after the user says yes | main worktree |
-| `backlog.md` | the human, deciding what groundwork should change | `wrap` | main worktree |
-| `plans/<topic>.md` | whoever picks the topic up | `wrap` records, updates, and removes it once it settles into `design.md` or is dropped; `task` removes it on promotion | main worktree |
-| `tasks/<task>.md` | the hook lists it; the executing session reads all of it | `task` creates it; after that, only the session executing it | created in the main worktree; updated wherever it executes |
-| `archive/` | rarely | `wrap` | main worktree |
+| 结局 | 怎么走 |
+|---|---|
+| 转成待办 | `待办` 模式把它写进 `tasks/` |
+| 定案成设计 | 收尾时先问用户，确认后写进 `design.md` 对应的区 |
+| 放弃 | 理由不显然的，问要不要记 ADR；然后删 |
+| 顺手做完 | 某次会话里直接解决了；结果是长期成立的事实，就写到它该在的地方（`design.md`、`context.md` 的坑） |
 
-**Nothing but `context.md` is created up front.** `design.md`, `devlog.md`, `roadmap.md`, `backlog.md` and the three directories each appear the first time something real goes into them. An empty template is noise — an AI reading an empty file doesn't know whether it's supposed to fill it in — and git does not carry an empty directory to any other machine.
+只定了一部分不算定：定了的写进 `design.md`、从「要解决什么」里划掉，文件留着。
 
-### One writer for shared documents
+## 命名
 
-**Shared documents — everything above except a task's own file — are written only by this command, and only in the main worktree.** A session executing a task writes code and its own task file, nothing else. Whatever it finds that belongs in a shared document goes under that file's *Write-back* block, and `wrap` in the main worktree carries it across after the merge.
+| 去处 | 文件名 | 例子 |
+|---|---|---|
+| `plans/` | `<层级>-<名字>.md`，层级 0～7 | `3-模块划分.md` |
+| `tasks/` | `<两位序号>-<名字>.md`，按开工顺序 | `01-搭目录骨架.md` |
+| `archive/` | `<完成日期>-<名字>.md` | `2026-10-16-搭目录骨架.md` |
 
-Why: parallel sessions each work in their own worktree, on their own branch. If every one of them also edits `context.md` or `roadmap.md`, every merge conflicts on the documents, and the injected state is whichever branch happened to merge last. With a single writer the documents never conflict, and code is the only thing left to merge.
+话题的层级按它**影响到的最早一层**算，不看它表面上谈什么。待办插队时，后面的顺延改名（`git mv`）；待办删掉或归档后留下的空号不必补。
 
-How to tell where you are:
+## 必备块
 
-```bash
-git rev-parse --path-format=absolute --git-dir --git-common-dir
-```
+每个模板列出必备块，两条规则管所有模板：
 
-Two identical lines → the main worktree. Two different lines → a linked worktree. **Keep `--path-format=absolute`**: without it, run from a subdirectory, one line comes back absolute and the other relative, and they never compare equal.
+1. **块必须在，标题随意**——用项目自己的语言和说法。没有程序解析这些块：hook 只读文件名和 git
+2. **空的块写「无」，不省略**——缺一块分不清是忘了还是没有。唯一例外是 `context.md`：它每次会话都被注入，空的一节白占注意力，所以空节直接不写
 
-**This assumes parallel work uses worktrees.** Running tasks side by side by switching branches inside the main worktree defeats it: every branch looks like the main worktree, shared documents get edited on all of them, and nothing warns you.
+## 模板
 
-### Required blocks
+### context.md
 
-Each template below lists **required blocks**. Two rules govern all of them:
+`context.md` 让 AI 从第一个 token 起就懂这个项目。**每一条都要过三道检查：**
 
-1. **The block must be present; its heading is free.** Write headings in the project's own language and wording. Nothing parses these blocks mechanically — the hook reads file names and git history, never sections — so the contract is the content, not the title.
-2. **An empty block says "none"; it is never left out.** A missing block is ambiguous: forgotten, or nothing to say? The one exception is `context.md`: it is injected into every session, and an empty section there spends attention and carries nothing, so an empty section is omitted instead.
+1. **git 推导不出**。技术栈、分支、未提交改动、最近提交、待办列表、过期基线都由 hook 采集——**绝不手写**
+2. **AI 不知道自己缺它**。它用到时自己会去查的（架构细节、ADR 全文），给指针不给内容
+3. **对任何 clone 这个仓库的人都成立**。只在某台机器上才撞的坑（某个 shell 的转义、本地路径、个人 git 配置）放用户级记忆。判据：换台机器、全新 clone，它还会咬人吗？
 
-## context.md — what gets in
-
-`context.md` exists so the AI understands this project from the first token. **Every entry has to pass all three tests:**
-
-1. **git can't derive it.** Tech stack, branch, uncommitted changes, recent commits, active tasks and the staleness baseline are all collected by the hook — **never hand-write them here**
-2. **The AI doesn't know it's missing it.** Anything it would think to look up when it needed it (architecture detail, full ADR text) gets a pointer, not the content
-3. **It holds for anyone who clones the repo.** A gotcha that exists only on one machine — a shell's quoting rules, a local path, a personal git setting — belongs in that person's user-level memory, not here. The test: *on another machine, after a fresh clone, would this still bite?*
-
-**There is no line limit.** Tables take room, and a line count punishes them without saying anything about whether an entry belongs. What keeps the file small is the three tests, applied entry by entry — and small still matters: not to save tokens, but because recall drops for material in the middle of a long context. Inject 500 lines and the 5 that matter get buried.
-
-**Structural gotchas only if they're permanent and recurring.** Anything fixable gets fixed instead of occupying the always-on budget.
+**不设行数上限。** 让文件保持小的是三道检查。小仍然重要，但不是为了省 token：长上下文中段的召回率会掉，注入 500 行，关键的 5 行反而被淹没。结构性的坑只收永久、反复撞的；能修的修掉。
 
 ```markdown
-# <project> · context
+# <项目> · context
 
-> Last updated: YYYY-MM-DD
-> Injected into every session. Only facts git can't derive, that the AI doesn't know it's missing.
+> 最后更新：YYYY-MM-DD
+> 每次会话注入。只写 git 推导不出、且 AI 不知道自己缺的事实。
 
-## What this is
-<one line: who uses it, what problem it solves>
+## 是什么
+<一句话：给谁用，解决什么>
 
-## What it doesn't do
-- <explicitly out of scope — stops the AI widening the scope on its own>
+## 不做什么
+- <明确不做的，防止 AI 自己扩范围>
 
-## Top-level modules
-| Module | Responsibility (one line) |
+## 顶层模块
+| 模块 | 职责（一句话） |
 |---|---|
 
-## Structural gotchas
-- <hits anyone who clones this repo, every time>
+## 结构性的坑
+- <任何 clone 这个仓库的人都会撞、每次都撞的>
 ```
 
-| Block | Required |
+| 块 | 必备 |
 |---|---|
-| Header with the date | always |
-| What this is | always — the core one |
-| What it doesn't do | strongly worth filling; omitted only while genuinely empty |
-| Top-level modules | omitted while there is no code |
-| Structural gotchas | omitted when there are none |
+| 带日期的头部 | 总是 |
+| 是什么 | 总是，最核心 |
+| 不做什么 | 强烈建议填，真没有才省略 |
+| 顶层模块 | 还没有代码时省略 |
+| 结构性的坑 | 没有就省略 |
 
-**What the hook appends after the file**: branch, uncommitted changes, active tasks (read off `docs/tasks/`), stack, recent commits, a staleness warning when it applies, and pointers to whichever other documents exist. None of it belongs in the file.
+**日期行重置过期警告。** hook 以最后一次改 `context.md` 的 commit 为基线，之后落下 5 个以上提交就警告，并点名变动的目录。所以收尾改日期并提交，就等于标记「已核对」。不往文件里写 commit hash：写进去的 hash 指向包含它的那个 commit，而 amend、rebase、squash 换掉的正是它。
 
-**The date line is what resets the staleness warning.** The hook takes the last commit that touched `context.md` as its baseline and warns once 5 or more commits have landed since, naming the directories they changed. So `wrap` updating the date — and committing it — marks the file as reviewed. No commit hash is written anywhere: a hash written into a file names the commit that contains it, and amend, rebase or a squash merge replaces exactly that commit. (If the date already reads today and nothing else changed, there is nothing to commit and the baseline stays at today's earlier update. That is fine.)
-
-## tasks/<task>.md — the task contract
-
-A task file is the contract between whoever decided the work and whoever executes it — often another session, possibly several in parallel. It is written so the executing session needs nothing else.
+### 话题（plans/）
 
 ```markdown
-# <task name>
+# <话题>
 
-> Opened: YYYY-MM-DD
+> 提出：YYYY-MM-DD
 
-## Goal
-<what is wanted, in your own words>
+## 来源
+<实际发生了什么，引出这个话题>
 
-## Boundary
-- Not doing: <explicitly excluded>
+## 要解决什么
+- <每个待定的问题、待验证的假设，或要修的缺陷>
 
-## Premises (inferred, confirmed)
-- <each premise the user never stated, confirmed before work started>
-
-## Definition of done
-- [ ] <verifiable: a command and its expected result, a measured number, a named test>
-
-## Handoff
-
-### Depends on
-<tasks that must merge before this one starts or merges — or "none">
-
-### Change scope
-<the files and directories this task will change>
-
-### Key files: core content fixed up front
-<for each shared key file: its interface, data shape or convention, as decided now — or "none">
-
-### When to come back
-<situations that must stop and ask the decider — or "none beyond the fixed rule">
-Fixed rule: changing anything outside Change scope always comes back first.
-
-## Execution conventions
-- Other tasks running at the same time → work in your own worktree, named after this file, so that `git worktree list` in the main worktree shows this task is under way. The only task running → the main worktree is fine.
-- Write code and this file. Nothing else: context.md, design.md, roadmap.md, devlog.md, backlog.md and plans/ are written in the main worktree after the merge. Put what they need under Write-back.
-- Unsure about something "When to come back" does not list → choose, record the choice and the reason under Progress, and carry on. The decider reviews these at merge time.
-- Done → tick Definition of done, commit, and say it is ready to merge.
-
-## Progress
-- YYYY-MM-DD <what happened; every choice made on your own, and why>
-
-## Write-back
-<for wrap in the main worktree, after the merge: gotchas, ADR candidates, project todos, friction with groundwork — or "none">
+## 讨论记录
+- YYYY-MM-DD <定了什么；还开着什么>
 ```
 
-| Block | Who uses it | Why it is required |
-|---|---|---|
-| Goal, Boundary, Premises | the executing session | Reasoning forward from premises nobody stated produces work that looks complete while pointing the wrong way |
-| Definition of done | the executing session; `wrap` when it archives | Set before the work, it is a test; written afterwards, it is a description of whatever got built |
-| Depends on | the human, ordering merges | Two tasks touching the same ground must merge in a known order |
-| Change scope | the next `task`, checking for overlap | Overlap is only detectable if every task declares its ground |
-| Key files | every parallel task; and the tie-breaker when a merge conflicts | Settled up front, a shared interface is something both sides build to rather than something they fight over at merge time |
-| When to come back | the executing session | Without it every doubt comes back to the decider. Three sessions means three times the interruptions, and parallel work ends up slower than serial — the bottleneck has moved to the decider |
-| Execution conventions | the executing session | The same text in every task file, so the contract does not depend on the session having read this skill |
-| Progress | the decider, reviewing afterwards | The choices made without asking are exactly what needs reviewing |
-| Write-back | `wrap` in the main worktree | The executing session must not edit shared documents, so what it learns has to wait somewhere |
+可选一行「什么时候必须定」（比如「开工第 1 步之前」），给同一层的话题排先后。
 
-**A key file** is either a file another active task also lists in its Change scope — the overlap check in `task` finds these — or a file many modules depend on: an interface, a schema, a config, a routing table.
+**门槛：真的发生过。** 假设出来的问题不记——写下来就是给虚构问题造组件的开始。开局话题的来源是「项目开局，这一层还没定」，过得了这道门槛。
 
-## plans/<topic>.md — under discussion
+### 待办（tasks/）
 
-One topic per file: `docs/plans/<YYYY-MM-DD>-<topic-slug>.md`. A topic may bundle a few closely related items; when one is promoted to a task it leaves the file, and the file goes when nothing is left in it.
+待办写给之后执行它的会话看，那个会话不需要别的东西就能开工。
 
 ```markdown
-# <topic>
+# <待办名>
 
-> Raised: YYYY-MM-DD
+> 开立：YYYY-MM-DD
 
-## Source
-<what actually happened that raised this>
+## 目标
+<要什么，用自己的话>
 
-## To decide
-- <each open question>
+## 边界
+- 不做：<明确排除的>
+- 改哪些文件：<文件和目录>
+- 改上面以外的文件，先回来问
 
-## Discussion record
-- YYYY-MM-DD <what was concluded; what is still open>
+## 前提（推断，已确认）
+- <用户没说、但这件事建立在上面的每一条，开工前已确认>
+
+## 完成标准
+- [ ] <可验证的：一条命令和它的预期结果、一个测得的数字、一个点名的测试>
+
+## 现状
+<每次覆盖：做完了什么、下一步做什么、卡在哪>
+
+## 自己拿的主意
+- YYYY-MM-DD <没问用户、自己定的选择，以及理由>
 ```
 
-**The bar for a topic: something actually happened.** A hypothetical problem goes nowhere — writing one down is how fictional problems acquire components.
-
-**A topic ends one of three ways, and in all three the file leaves `plans/`** — a settled topic left behind reads as still open to every session that follows:
-
-| Ending | What happens |
+| 块 | 为什么必备 |
 |---|---|
-| **It becomes work** | Discussed far enough that `task` can state its goal, boundary, premises and definition of done → `task` promotes it to `tasks/` |
-| **It settles as a design decision** | The answer is a decision, not a piece of work — the usual ending in a project that designs before it codes → once the user confirms it is settled, `wrap` writes the conclusion into `design.md`, in the zone it belongs to, and removes the topic file. A core-zone conclusion goes through the ADR question first. No `design.md` yet → this is its first real content; create it |
-| **It ends in "no"** | Non-obvious reasoning → offer an ADR, so it isn't raised again from scratch; otherwise just remove the file |
+| 目标、边界、前提 | 从没人说过的前提往下推，做出来的东西看着完整，方向却是歪的 |
+| 完成标准 | 动手前定的是测试；做完再写，只是对做出来的东西的描述 |
+| 现状 | 下一个会话靠它接手。覆盖而不是追加，流水账交给 git |
+| 自己拿的主意 | 没问就定的，正是做完时要给用户审的 |
 
-git keeps the discussion record in every case.
+### 归档背景（archive/）
 
-**Partly settled is not settled.** When some of a topic's questions are decided and others are not, write the decided part into `design.md`, take it off To decide (the discussion record keeps the history), and keep the file until nothing is left open. Removing the file early loses the open remainder; waiting for the last question keeps decided design out of `design.md`.
-
-## design.md — two zones
-
-| Zone | Required blocks | Changes how |
-|---|---|---|
-| **Core** | goals and intent; principles and hard constraints; the full boundary | Rarely. Every change needs an ADR, and `context.md`'s "What this is" and "What it doesn't do" — the digest of this zone — change with it |
-| **Phase** | which roadmap phase it describes; current architecture (layout, data flow); known risks | Rewritten as a whole when a new roadmap phase opens |
-
-Mark the zones visibly: as two top-level parts, or with a zone table at the top when existing section numbers are referenced elsewhere and must not move.
-
-A `plans/` topic that settles as a design decision lands here, in whichever zone it belongs to.
-
-**Not in `design.md`**: pending items (→ `plans/`), decision rationale (→ `devlog.md`), history (→ `roadmap.md`). An architecture document is not a todo list; one that becomes one stops being read as architecture.
-
-**Created when there is real content.** For a project that designs before it codes, that is the first settled design discussion — the core zone holds the intent and the phase zone holds the planned architecture. That is a design draft, not a snapshot, and it is exactly what this file is for at that stage.
-
-## backlog.md — friction with groundwork itself
-
-Feedback on groundwork as a tool, met while using it on this project. **This project's own pending work is not here** — that goes to `plans/`.
+待办做完、决定存下时，压成一份背景，只留以后改它做出来的东西时用得上的：
 
 ```markdown
-# groundwork backlog · <project>
+# <名字>
 
-> Friction with groundwork itself, met while using it on this project.
+> 完成：YYYY-MM-DD
 
-## B-01 · <short title>
-**What happened** (YYYY-MM-DD): <the actual incident>
-**To decide**: <what would have to change>
-<optional: root cause, cost, suggested fix>
+## 做了什么、为什么做
+<一两句>
+
+## 涉及的文件
+- <路径——改动前按路径搜归档，靠的就是这一块>
+
+## 前提
+- <现在仍然成立的>
+
+## 取舍
+- <现在仍然成立的选择，以及当时为什么这么选>
 ```
 
-The bar is the same as for `plans/`: something actually happened, here, while using groundwork. Numbers run in order and are never reused.
+完成标准和现状是给执行用的，不进背景。它做出来的东西被改了，背景跟着改；整个被重写或删掉，背景就删。
 
-## devlog.md and roadmap.md
+### design.md
 
-**ADR format** (`devlog.md`): context / options considered / decision / rationale / trade-off / Revisit When / landing commit. The landing commit keeps decision → implementation traceable. A superseded ADR stays in full, marked as superseded, and the new one says what it supersedes.
-
-**Roadmap format**: a phase is not a time span, it is "this batch of work solves one problem" — the heading names the problem, with a date range. Entries are **pointers only, never status**: what it settled, its ADR if any, its landing commit, and the archived task file.
-
-## Committing (all four modes)
-
-Every mode commits what it wrote, and only that:
-
-1. **Before writing anything, note which files already have uncommitted changes** (`git status --short`). Never commit those — your commit would sweep the user's in-flight edits in with yours. Report them instead
-2. **Stage by path, only the files this run wrote**: `git add <path>`, `git mv`, `git rm`. Never `git add -A` or `git add .`
-3. **One commit per run.** Write the message in the language and style of the repository's recent commits (`git log --oneline -10`); with no history yet, plain English in the imperative
-4. **Never push**
-5. **`git add` refuses a path because it is ignored → stop and report.** Don't force it with `-f`: someone chose to ignore it, and whether these documents belong in git is their decision. `groundwork-audit` reports ignored and uncommitted files under `docs/`
-6. **The user has said not to commit** — this session, or in their standing instructions → stop at listing the changed files
-
-In a linked worktree the commit lands on that task's branch. That is intended: the task file travels with the work and merges with it.
-
-## init — set up the documentation skeleton (once per project)
-
-### 1. Preflight
-
-`docs/context.md` **already exists** → stop, tell the user the project is already set up, and ask whether they want `wrap` to update it or genuinely intend to rebuild. **Never overwrite** — everything in that file was obtained by asking, and overwriting means asking all over again.
-
-**Look at what the project already has.** List the markdown files under `docs/` and at the repository root, leaving out `README*`, `LICENSE*`, `CHANGELOG*` and `CONTRIBUTING*`. Anything found → **stop and ask, file by file**, where it belongs:
-
-| Existing file | Where it can go |
-|---|---|
-| A design document | becomes `design.md` — which parts are core zone, which are phase zone |
-| A decision log | becomes `devlog.md` |
-| A todo or pending list | its items become `plans/` topics |
-| Anything else | stays where it is, outside the layout |
-
-**Never move, rename or rewrite one on your own.** They hold the user's work, and a wrong guess is a manual rollback. A design document written before any code is a design draft — map it onto `design.md` as such, don't relabel it an architecture snapshot.
-
-### 2. Read what's mechanically readable, don't ask
-
-Per "anything derivable is never hand-written," look before you open your mouth:
-
-```bash
-ls -d */                            # top-level directories, to seed the module list
-```
-
-Filter out the obvious non-modules: `node_modules`, `.git`, `dist`, `build`, `target`, `venv`, `__pycache__`, `.venv`, `vendor`.
-
-**Never ask about or write down tech stack, branch, uncommitted changes, recent commits or active tasks** — the hook collects all of it every session, and writing it into a file only creates drift. Directories are the exception: the hook does not list them, so the module table below is where they live.
-
-### 3. Ask four things (don't guess, don't infer from the README)
-
-**Why not guess**: a wrong guess gets **force-injected into every single session**, and the AI treats it as authoritative. That costs far more than a few extra questions.
-
-| Ask | Notes | Can it be empty? |
+| 区 | 必备块 | 怎么改 |
 |---|---|---|
-| **What is this project** | One line: who uses it, what problem it solves | No — this is the core one |
-| **What it doesn't do** | Explicitly out of scope, stops the AI from widening scope on its own | Can start empty, but strongly worth filling |
-| **What is each directory responsible for** | List the directories from step 2 and have the user give one line each | New project with no code → omit the section |
-| **Any known gotchas** | **Only the permanent, recurring kind that would bite anyone who clones the repo.** Fixable ones get fixed; machine-specific ones belong in user-level memory | New projects usually have none → omit the section |
+| **核心区** | 目标与意图；原则与硬约束；完整的边界 | 很少改。每次改都要有 ADR，`context.md` 的「是什么」「不做什么」（核心区的摘要）跟着改 |
+| **阶段区** | 描述的是 roadmap 哪个阶段；当前架构（布局、数据流）；已知风险 | 开新阶段时整段重写 |
 
-**Omitting a section beats leaving it empty** — in `context.md` an empty table costs space and conveys nothing.
+两个区要看得出来：分成两大部分，或者在顶部用分区表标出（节号被别处引用、不能挪的时候）。
 
-### 4. Generate
+**不放进 `design.md`：** 待定事项（→ `plans/`）、决策理由（→ `devlog.md`）、历史（→ git 和 roadmap 阶段表）。架构文档一旦变成待办清单，就没人把它当架构读了。
 
-Create exactly one file: **`docs/context.md`**, from the template in "context.md — what gets in". **No directories** — `plans/`, `tasks/` and `archive/` appear when their first file does; git does not track an empty directory, so an empty one would exist on this machine and nowhere else.
+**有真内容时才建。** 先设计后写代码的项目，第一个定案的设计话题就是它的第一份内容：核心区写意图，阶段区写计划中的架构。
 
-**Contract vs. convention** (this determines how freely the format can evolve later):
+### devlog.md
 
-| | What | Breaking it does what |
+**只放现在有效的决策。** 每条 ADR 的格式：背景／候选方案／选择／理由／代价／何时重审／落地 commit。落地 commit 让「决策 → 实现」能回溯。
+
+1. 整条失效 → **删除**。取代它的新 ADR 在背景里写一句：取代了什么、原文在哪个 commit
+2. 部分失效 → 删掉失效的那部分
+3. 编号是永久 ID：删了留空号，**不重排**——commit message 里引用的编号改不了，一重排就全部指错
+4. 删之前先核对：取代它的 ADR 有没有装下旧 ADR 里仍然有效的部分，没装下的先并进去
+5. 「何时重审」是唯一往前看的一栏：其余各栏都在回答当初为什么这么选，只有它回答什么时候该改
+
+### roadmap.md
+
+阶段表，每个阶段一行。**阶段不是时间段，是「这一批工作解决一个问题」。** 不列条目、不放指针：做了什么在 git 里，为什么在 devlog 里。
+
+```markdown
+| 阶段 | 时间 | 解决了什么 |
 |---|---|---|
-| **Contract** | The paths `docs/context.md`, `docs/plans/`, `docs/tasks/`, `docs/archive/` | The hook can't find the file, lists no tasks, points nowhere; audit checks the wrong place |
-| **Convention** | Headings, ordering, table columns, wording, language | Nothing breaks — **the hook doesn't parse structure: it injects the file verbatim and reads the rest from the directory listing and git** |
-
-### 5. Commit and report
-
-Commit `docs/context.md` (see "Committing"), then report:
-
-- Which file was created, and the commit
-- **How to make injection take effect**: installing the groundwork plugin is enough, **no configuration required**
-- The next session will open with `<groundwork-context>` present
-
-## task — turn a decision into a task contract
-
-Treats two failure modes: **the AI reasoning forward from premises nobody stated**, and **the AI claiming completion without verifying**. Its output is a task file another session can execute without asking anything the file already answers.
-
-### When to use it
-
-| Situation | Use task? |
-|---|---|
-| A `plans/` topic has been discussed to a decision | Yes — the most common case |
-| A new, non-trivial piece of work, and you want to start without a discussion round | Yes |
-| The work will be handed to another session, or run in parallel with other tasks | Yes — the handoff blocks exist for exactly this |
-| Renames, formatting, typo fixes, read-only lookups, throwaway scripts | No — pure overhead |
-| Unsure | Ask: if this goes sideways, will anyone need to look up what was agreed? If yes, use it |
-
-**The questioning discipline in steps 2–4 always applies, file or no file.** The core of task is those three questions, not the document.
-
-### 1. Preflight
-
-- `docs/context.md` missing → stop and tell the user to run `/groundwork:docs init` first
-- **In a linked worktree → stop.** The task file has to be committed in the main worktree, where every later session branches from — otherwise parallel sessions cannot see each other's change scope, and the overlap check below is blind
-- **The source**: whatever follows `task` in `$ARGUMENTS` names a `plans/` file or describes new work; nothing → ask. A `plans/` source → read the whole topic first; its discussion record is where the premises come from
-
-### 2. Restate the goal as you understand it
-
-In your own words: **what is wanted** and **where the boundary is** (what's explicitly excluded).
-
-**Never parrot the user's phrasing back** — repetition proves nothing, and the entire point of this step is to surface a misunderstanding before any work starts.
-
-### 3. Surface the premises you're inferring (this step is not optional)
-
-List, one by one, everything you're about to build on that the user never said, **marked as inference rather than requirement**:
-
-- User didn't say where it's stored → "I'm assuming `data/`, you didn't say"
-- User didn't say whether to support the old format → "I'm assuming no, new format only"
-
-**Why this has to be explicit**: reasoning forward from unstated premises produces output that looks complete while pointing the wrong way, and **the error is hard to see** — the assumption is buried in the implementation and only surfaces at runtime.
-
-**If you can't list any, say so.** Don't invent two trivial ones to fill the section.
-
-### 4. State what "done" means
-
-It has to be **verifiable**, not an adjective.
-
-| ✗ Not a criterion | ✓ Is a criterion |
-|---|---|
-| Good code quality | `node test.js` — all 13 pass |
-| Smooth user experience | First paint < 1s (measured in DevTools) |
-| Refactor complete | Existing tests pass + 3 new edge-case tests |
-
-**Criteria are set before the work, not backfilled after.** Anything written afterwards is tailored to whatever got built, which means nothing was ever defined.
-
-### 5. Settle the handoff
-
-**Depends on** and **Change scope** first. Then **check for overlap**: read the Change scope and Key files of every other file in `docs/tasks/`. For each file both tasks touch:
-
-| The other task | Do |
-|---|---|
-| Already fixed this file's core content | Adopt it — copy it into this task's Key files block |
-| Listed the file, fixed nothing, and **has not started** (no worktree named after it in `git worktree list`) | Fix the core content now, in both task files — the other one is still yours to edit in the main worktree |
-| Listed the file, fixed nothing, and is under way — or you can't tell | Stop and ask: make this task depend on it, or narrow this task's scope. **Never edit its file** — its branch owns it now, and an edit here becomes a merge conflict there |
-
-Add the files many modules depend on to Key files as well, then **When to come back**: the situations that genuinely need the decider. Keep it short — everything not listed, the executing session decides and records.
-
-### 6. Stop and wait for confirmation
-
-Deliver steps 2–5 together and **wait for the user to confirm or correct before writing anything**.
-
-This is where "stop when unsure" lands: **the moment to stop is now**, not halfway through when it turns out not to work.
-
-### 7. Write it, retire the plan, commit
-
-- Write `docs/tasks/<YYYY-MM-DD>-<task-slug>.md` from the template in "tasks/<task>.md — the task contract". Copy the Execution conventions block verbatim
-- From a `plans/` source: take the promoted topic out of its file — `git rm` the file if nothing else is left in it, edit the topic out otherwise
-- Commit both (see "Committing")
-
-No registration step: the hook lists `docs/tasks/` itself, so the task appears in the next session's injection by existing.
-
-### 8. Report
-
-- The conclusions from steps 2–5, as confirmed
-- The task file, and the commit
-- **How to execute it**:
-  - The only task running → carry on here, or in any new session, in the main worktree
-  - Others running → open a new session, have it create a worktree named after the task file, and tell it to execute `docs/tasks/<file>`
-
-## wrap — sync at session end
-
-### 1. Preflight
-
-- `docs/context.md` missing → stop and tell the user to run `/groundwork:docs init` first. Don't generate around the scaffolding
-- **Find out where you are** (see "One writer for shared documents") — the two cases below do different things
-- Note which files already have uncommitted changes, before writing anything (see "Committing")
-
-### 2. In a linked worktree — executing a task
-
-1. **Identify this session's task file** — the one it was told to execute. Can't tell → ask
-2. **Update it**: Progress (date, what happened, every choice made without asking and why); tick the Definition-of-done items that are verifiably done; add to Write-back anything that belongs in a shared document — a structural gotcha, a non-obvious decision (an ADR candidate), a project todo that isn't this task, friction with groundwork itself
-3. **Touch nothing else.** Commit the task file
-4. **Report** what changed. Every done item ticked → say the task is ready to merge, and that `wrap` in the main worktree archives it afterwards
-
-### 3. In the main worktree — distill this session
-
-Read back through the session and determine:
-
-- Did a task executed here make progress? → its Progress block, as in the worktree case
-- Were top-level modules added or removed?
-- Did you hit a **structural gotcha** that passes the three tests?
-- Were any non-obvious technical decisions made (the options-plus-rationale kind)?
-- Did something come up that the project should do, but not now? → a `plans/` topic
-- Was a `plans/` topic discussed? → its discussion record — or, if it settled, step 5
-- Did groundwork itself get in the way? → `backlog.md`
-
-Anything after the mode word in `$ARGUMENTS` is a hint about what mattered, but reading the session still governs.
-
-### 4. Update `context.md` directly (no need to confirm item by item)
-
-- **Top-level module table**: only touch it if modules were actually added or removed. **One line of responsibility per module, keyed by its directory** — the hook does not list directories, so the key is where the location lives; the layout inside a module belongs in `design.md`
-- **Structural gotchas**: filter through the three tests and the permanence bar
-- **The date line — never skip it.** Updating it is what marks the file as reviewed and resets the staleness baseline. Skip it and every following session carries a "context.md may be stale" warning; after a few rounds the AI learns to ignore it, and **the whole staleness guard stops working**
-
-### 5. Record topics and friction
-
-- A new topic → a new `plans/` file; a discussed topic → a dated line in its discussion record
-- **A topic that settled as a design decision** → **ask first**: whether a topic is settled is a judgement call, exactly like whether a task is done, and a conclusion written into `design.md` reads as decided to every later session. Confirmed → write the conclusion into `design.md`, in the zone it belongs to, then `git rm` the topic file. A core-zone conclusion waits for the ADR question in step 8. A topic that ended in "no" is removed the same way, after the ADR offer. **Only partly settled** → the decided part goes into `design.md` and comes off To decide; the file stays
-- Friction with groundwork → a new entry in `backlog.md`, creating the file with its header on the first entry
-- **Same bar for both: something actually happened.** Nothing qualifies → write nothing, and don't ask
-
-### 6. Archive finished tasks (confirm first)
-
-A task is a candidate when every Definition-of-done item is ticked, or the user says it is merged and done. **Ask the user**, then for each one confirmed:
-
-1. **Carry its Write-back across**: gotchas → `context.md` (three tests apply); ADR candidates → the question in step 8; project todos → `plans/`; friction → `backlog.md`
-2. Move it:
-
-   ```bash
-   mkdir -p docs/archive
-   git mv docs/tasks/<file>.md docs/archive/
-   ```
-
-3. **Append it to the current phase in `docs/roadmap.md`** — what it settled, its ADR if it has one, its landing commit, and a pointer to the archived file. **No roadmap yet → ask whether to start one**; a project with one archived task has no history worth mapping
-
-**Archiving and registering are separate actions, and the second is the one that gets dropped.** A task archived but never added to the roadmap leaves a hole nothing will surface on its own; `groundwork-audit` checks for exactly this.
-
-**Opening a new phase is a judgement call — ask the user.** A phase is not a time span, it is "this batch of work solves one problem". wrap appends to the current phase; it never opens one by itself. **When the user does open one and `design.md` exists, its phase zone is now out of date**: draft the rewrite for the phase that is starting, and write it once the user agrees.
-
-**Why confirm the archiving**: "is this task actually done" is a judgement call, and getting it wrong means a manual rollback.
-
-### 7. design.md core zone
-
-If this session changed a goal, a principle or the boundary, that is a core-zone change: it goes through the ADR question in step 8, and `context.md`'s "What this is" and "What it doesn't do" follow it. Never edit the core zone without that ADR.
-
-### 8. ADR confirmation (never write one directly)
-
-When step 3, a settled or dropped topic in step 5, a Write-back block or step 7 surfaces a non-obvious decision, **stop and ask**: "Record an ADR for this? <candidate title + one-line context>"
-
-- User says yes → append to `docs/devlog.md` in the standard format (create the file if absent), including the **landing commit hash**, so decision → implementation stays traceable
-- User says no, or it's a small decision → don't write it
-
-**The bar for an ADR is higher than for anything else here.** Don't let the direct-write behavior of step 4 spill over into devlog. `git log` records what changed; an ADR records "considered A/B/C, chose B because X, at cost Y" — git can't replace that, but writing too many of them drowns the signal.
-
-### 9. Commit and report
-
-Commit everything this run wrote (see "Committing"), then report:
-
-- Which sections of `context.md` changed
-- Topics and backlog entries recorded
-- Tasks archived, and where they went in the roadmap
-- Whether the ADR question was asked, and the answer
-- The commit — and any file left uncommitted because it already had changes in flight
-
-## audit — consistency check (periodic, user-initiated)
-
-### 1. Run the mechanical half
-
-```bash
-groundwork-audit
+| 1 · <问题> | YYYY-MM-DD ～ MM-DD | <一句话> |
 ```
 
-The script ships in this plugin's `bin/`, which Claude Code puts on PATH. If the name is not found, fall back to `node bin/groundwork-audit` (only works when the cwd is the groundwork repo itself) and report that the plugin's `bin/` is not on PATH — that is a finding in its own right.
+### backlog.md
 
-It runs every check that is genuinely mechanical: whether the hook executes, skill frontmatter that silently voids itself, dead links, files under `docs/` that git ignores or has not committed, ADR numbering, cited commits, cross-file section references, README and translation drift in both directions, archived tasks that never reached the roadmap, hand-written fields the hook already collects (a hand-kept task list or baseline hash included), misplaced content, external-package references, `Revisit When` clauses, tasks that have not moved in a month. Each check reports clean, findings, **skipped with a reason**, or **errored** — a check that throws says so rather than passing quietly.
+在这个项目里用 groundwork 时，groundwork 本身带来的摩擦。**项目自己的待定事项不在这里**，在 `plans/`。
 
-`--json` gives the same results structured, if you would rather organise the report yourself.
+```markdown
+# groundwork backlog · <项目>
 
-**Do not re-run these checks by hand.** A second copy of a check written into this file is a second implementation that will drift from the first; the script is the only copy.
+> 在这个项目里用 groundwork 时，groundwork 本身带来的摩擦。
 
-### 2. The test for what to do with a finding: is there one obvious fix?
+## B-01 · <短标题>
+**实际发生**（YYYY-MM-DD）：<具体经过>
+**要定什么**：<需要改什么>
+```
 
-**Not "can it be checked mechanically."** Take the checks one at a time and that test falls apart:
+门槛同话题：真的在这里、用 groundwork 时发生过。编号顺序递增、不复用；解决了就删掉那一条，空了就删文件。
 
-> **Detection mechanises. Repair usually needs judgement. Being able to detect is not the same as knowing what to do.**
->
-> **One obvious fix, apply it. More than one, report only.**
+## 提交（四个模式共用）
 
-Example: "a file referenced in `context.md` does not exist" is perfectly mechanical to detect, but **the fix is not unique** — delete the reference, or create the file that should have existed? The script cannot know, so it only reports.
+每个模式提交自己写的东西，只提交这些：
 
-**Across everything the script finds, the only one you may fix directly is ADR renumbering.**
+1. **动笔前先记下哪些文件已经有未提交的改动**（`git status --short`），这些绝不提交——会把用户进行中的改动卷进来。在报告里列出来
+2. **按路径暂存，只暂存这次写的**：`git add <路径>`、`git mv`、`git rm`。绝不用 `git add -A` 或 `git add .`
+3. **一次运行一个 commit。** message 照仓库最近提交的语言和风格写（`git log --oneline -10`）；还没有历史就用中文
+4. **绝不 push**
+5. **`git add` 因为路径被 ignore 而拒绝 → 停下报告**，不用 `-f` 硬加：有人选择了忽略它，这些文档该不该进 git 是他的决定
+6. **用户说过不要提交**（这次会话或常驻指令里）→ 只列出改动的文件
 
-Two categories in its output are **lists, not errors** — read them, do not try to fix them:
+## 四个模式共用的约束
 
-- `skill-kinds` — classifies every skill as command or auto-triggering. Which one is correct requires reading the content; the script only lists
-- `revisit-when` — every forward-looking clause in the devlog. Whether one has fired is not mechanically decidable
-
-**Three findings are expected, not bugs**: a lesson that cites a package name is a record rather than a dependency; a pointer like "trade-off: see ADR-011" is a pointer, not misplaced content; and a check that names other packages will match itself. A keyword check cannot separate "mentions" from "depends on" — that is this class of check's ceiling, which is why it reports rather than fixes.
-
-### 3. The half no script can do — this is where you actually work
-
-The script compares **documents against documents and documents against git**. It never opens the implementation. So these are yours, and they are where the real drift lives:
-
-| Judgement pass | What to actually do |
-|---|---|
-| **Documentation vs implementation** | Read the code the documents describe and check it against every behavioural claim in `design.md` and the README. A claim that describes a mechanism nobody built looks exactly like a true one from inside the docs |
-| **Is each description still true** | Project identity, module responsibilities, whether an ADR's conclusion has been overtaken by later practice |
-| **Structural gotchas** | Whether a long-recorded gotcha still applies, and whether it still passes the three tests — not mechanically decidable, so raise the ones you doubt |
-| **Roadmap phases** | Whether an entry landed in the right phase. Its pointers can all resolve while the entry sits under the wrong heading |
-| **Tasks and topics** | Whether a task in `docs/tasks/` is still alive, and whether a `plans/` topic has quietly been decided without being promoted or dropped |
-
-This section was once ruled out entirely on the grounds that evaluation does not belong in a skill. That reasoning holds for **auto-triggering** skills, where it becomes noise. audit is a command: running it *is* the request for this. But the report **must mark this section as judgement rather than fact, needing your verification**, and must never auto-fix.
-
-### Output shape
-
-The report has four sections, and **the fourth is not optional**:
-
-1. **Fixed** — only the single-obvious-fix kind, like ADR renumbering
-2. **Needs your call** — a problem was found but the fix is not unique; list the options
-3. **Signals** — not errors, architectural health indicators (`context.md` growth, gotcha count, module table growth, tasks piling up)
-4. **What was not checked this run**
-
-Section 4 is the important one: audit misses far more than it catches. Without it, an all-clear gives **false confidence** — **a check that does not state what it checked is more dangerous than no check at all.**
-
-A fix applied here is committed like any other write (see "Committing").
-
-### No auto-triggering
-
-Having the hook suggest running audit when drift exceeds a threshold was **rejected**: that is a tool prompting you about itself, the exact noise this pack refuses to make, and the cost of a missed audit is only that problems accumulate for a while, not immediate breakage. Run it when you want it.
-
----
-
-## Constraints shared by all four modes
-
-- **ADRs always require asking the user.** No mode may write one automatically. This outranks any direct-execution setting elsewhere
-- `context.md` may be written directly, without item-by-item confirmation
-- **Shared documents are written only in the main worktree** (see "One writer for shared documents")
-- **Commit what you wrote, by path; never push** (see "Committing")
-- If any step fails, report exactly where it failed — do not paper over it with a claim of success
-- Always write files as UTF-8
+- **ADR 一律先问用户**，没有哪个模式能自动写；这条高于别处任何「直接执行」的设置
+- `context.md` 可以直接写，不必逐条确认
+- 任何一步失败，如实报告卡在哪，不用「已完成」糊过去
+- 文件一律写成 UTF-8
