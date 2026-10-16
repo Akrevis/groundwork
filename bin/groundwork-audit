@@ -147,9 +147,15 @@ const CHECKS = [
     run(c) {
       const body = c.read('docs/context.md') || '';
       const refs = [...new Set([...body.matchAll(/`([^`\n]*\.md)`/g)].map((m) => m[1]))];
+      // 只写了文件名的引用（`owncc.md`）不知道在哪个目录：按文件名在全仓库找，有一个就算存在。
+      // 让 git 按名字匹配，不列出全部文件自己找——大仓库的完整清单会撑爆 execSync 的输出缓冲。
+      const found = (r) =>
+        r.includes('/')
+          ? c.exists(r)
+          : !!c.git(`ls-files --cached --others --exclude-standard -- ":(glob)**/${r}"`);
       return refs
-        .filter((r) => !/^[A-Za-z]:\//.test(r) && !r.includes('<')) // 绝对路径和占位符不管
-        .filter((r) => !c.exists(r))
+        .filter((r) => !/^([A-Za-z]:|~)\//.test(r) && !r.includes('<')) // 盘符和 ~ 开头的在仓库外，占位符不是路径
+        .filter((r) => !found(r))
         .map((r) => `context.md 指向一个不存在的文件：${r}`);
     },
   },

@@ -97,6 +97,23 @@ t('文件在就不报', () => {
   clean(root);
 });
 
+t('只写文件名的引用，按文件名在全仓库找', () => {
+  const root = tmp();
+  gitRepo(root);
+  write(root, 'docs/context.md', '# c\n\n见 `owncc.md`、`context.md`、`待办.md`，还有 `gone.md`\n');
+  write(root, 'output-styles/owncc.md', '# o\n');
+  write(root, 'notes/深一层/待办.md', '# t\n');
+  assert.deepStrictEqual(findings(root, 'dead-links'), ['context.md 指向一个不存在的文件：gone.md']);
+  clean(root);
+});
+
+t('~/ 开头的路径在仓库外，不查', () => {
+  const root = tmp();
+  write(root, 'docs/context.md', '# c\n\n生效的副本在 `~/.claude/output-styles/owncc.md`\n');
+  assert.deepStrictEqual(findings(root, 'dead-links'), []);
+  clean(root);
+});
+
 // ---------- docs/ 下 git 没有的文件 ----------
 // 被忽略的那种最无声：`git add -A` 跳过它，commit 报告成功，文件只在一台机器上有。
 
