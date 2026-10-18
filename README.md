@@ -64,7 +64,7 @@ claude plugin install groundwork@groundwork
 在项目里跑：
 
 ```
-/groundwork:docs 建档
+/groundwork:docs init
 ```
 
 它会问四件事（这个项目是什么、不做什么、各目录负责什么、已知的坑），生成 `docs/context.md`；新项目还会建一份「第一版草案」话题——接下来你说说想要它做什么，AI 据此起草第一版的边界和框架。项目里已经有设计笔记或决策记录的，它会先逐个问清每份该归到哪里，再动手。
@@ -73,20 +73,20 @@ claude plugin install groundwork@groundwork
 
 | 命令 | 什么时候 |
 |---|---|
-| `/groundwork:docs 待办` | 定下来一件或几件事、留给之后的会话做时。每件写成 `docs/tasks/` 里的一份待办，按开工顺序编号 |
-| `/groundwork:docs 收尾` | 会话结束时，把这次的变化写回文档 |
-| `/groundwork:docs 体检` | 定期查文档的一致性 |
+| `/groundwork:docs task` | 定下来一件或几件事、留给之后的会话做时。每件写成 `docs/tasks/` 里的一份待办，按开工顺序编号 |
+| `/groundwork:docs wrap` | 会话结束时，把这次的变化写回文档 |
+| `/groundwork:docs audit` | 定期查文档的一致性 |
 | `/groundwork:module-boundaries` | 设计新模块、定跨模块调用关系时 |
 
-模式关键字中英都认：`建档`／`init`、`待办`／`task`、`收尾`／`wrap`、`体检`／`audit`。
+四个模式：`init`（建档）、`task`（待办）、`wrap`（收尾）、`audit`（体检）。要敲出来的名字一律是英文。
 
-`体检` 分两半。机械检查固化成了 **`groundwork-audit`**，插件会把它放进 PATH，共 13 条：死链、被 git 忽略或没提交的文档、ADR 编号重复或乱序、引用了已删的 ADR、跨文件的章节引用、skill 的 frontmatter 会不会静默作废等。每条检查报告「通过」「有发现」「出错」或**「跳过并说明原因」**，报告末尾列出它够不到的部分。需要判断的那一半——文档描述的行为和代码还对不对得上——由命令带着你走。
+`audit` 分两半。机械检查固化成了 **`groundwork-audit`**，插件会把它放进 PATH，共 13 条：死链、被 git 忽略或没提交的文档、ADR 编号重复或乱序、引用了已删的 ADR、跨文件的章节引用、skill 的 frontmatter 会不会静默作废等。每条检查报告「通过」「有发现」「出错」或**「跳过并说明原因」**，报告末尾列出它够不到的部分。需要判断的那一半——文档描述的行为和代码还对不对得上——由命令带着你走。
 
 三个自动触发的 skill 不用调：
 
 | skill | 什么时候起作用 |
 |---|---|
-| `verify-first` | 要写出版本号、API 参数、文件路径这类会被直接照抄的事实，或要新增工具函数时 |
+| `verify-first` | 要写出版本号、API 参数、文件路径这类会被直接照抄的事实，或要新增工具函数、依赖时 |
 | `change-scope` | 要改或删已有代码时；项目有归档背景的，先读、改完同步 |
 | `decision-order` | 讨论项目设计时：按阶段和决策顺序走，边界和框架由它起草，跑题时点出来、拉回来 |
 

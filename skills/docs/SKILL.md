@@ -1,6 +1,6 @@
 ---
 name: docs
-description: "groundwork 文档工作流——建档（init，生成 docs/context.md 和开局的话题、草案）、待办（task，把定下来的事写成 docs/tasks/ 里的待办）、收尾（wrap，会话结束时把变化写回 docs/）、体检（audit，查文档的一致性）。只能手动调用，模型不会自己触发。"
+description: "groundwork 文档工作流——init（建档：生成 docs/context.md 和开局的话题、草案）、task（待办：把定下来的事写成 docs/tasks/ 里的待办）、wrap（收尾：会话结束时把变化写回 docs/）、audit（体检：查文档的一致性）。只能手动调用，模型不会自己触发。"
 disable-model-invocation: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git log:*), Bash(git status:*), Bash(git diff:*), Bash(git mv:*), Bash(git rm:*), Bash(git add:*), Bash(git commit:*), Bash(mkdir:*), Bash(groundwork-audit:*), Bash(node bin/groundwork-audit:*)
 ---
@@ -13,10 +13,10 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git log:*), Bash(git status:*
 
 | 第一个词 | 模式 | 用 Read 读 |
 |---|---|---|
-| `建档` 或 `init` | 给项目建立文档骨架（每个项目一次） | `${CLAUDE_SKILL_DIR}/init.md` |
-| `待办` 或 `task` | 把定下来的事写成待办 | `${CLAUDE_SKILL_DIR}/task.md` |
-| `收尾` 或 `wrap` | 会话结束时把变化写回文档 | `${CLAUDE_SKILL_DIR}/wrap.md` |
-| `体检` 或 `audit` | 查文档的一致性 | `${CLAUDE_SKILL_DIR}/audit.md` |
+| `init` | 建档：给项目建立文档骨架（每个项目一次） | `${CLAUDE_SKILL_DIR}/init.md` |
+| `task` | 待办：把定下来的事写成待办 | `${CLAUDE_SKILL_DIR}/task.md` |
+| `wrap` | 收尾：会话结束时把变化写回文档 | `${CLAUDE_SKILL_DIR}/wrap.md` |
+| `audit` | 体检：查文档的一致性 | `${CLAUDE_SKILL_DIR}/audit.md` |
 
 **没有参数，或者第一个词不在表里 → 停下问用户要哪个模式，不要猜。** 选定后只读对应的那一份，按里面的步骤做。本文的规则和模板四个模式共用。
 
@@ -62,14 +62,14 @@ docs/
 - **当场定、当场做完的事不建文件**，commit 就是记录
 - **每个阶段一份草案**：阶段开始时，这一阶段的边界和框架由 AI 起草进 `plans/1-<阶段>草案.md`，起草的规矩在 `decision-order` skill。定下的部分写进 `design.md`、从草案里划掉；要干的活写成待办；全部定完，草案删掉
 - **草案默认不拆**，细节就在草案里谈。只有两种情况拆成单独的话题：它会拖得整份草案关不掉——谈了几个会话还没定，别的部分全定了草案也删不掉，注入里一直显示它最靠前；它挪到了后面的阶段——话题里写明「什么时候必须定：第 N 阶段」
-- 待办有两个来路：`待办` 模式把定下来的事写进去；本次会话开了工、没做完、又没有待办文件的事，由 `收尾` 写进去
+- 待办有两个来路：`task` 模式把定下来的事写进去；本次会话开了工、没做完、又没有待办文件的事，由 `wrap` 写进去
 - 讨论的先后按 `decision-order` skill 的八层；话题文件名以层级开头，`docs/plans/` 里文件名最小的就是现在该定的
 
 话题有四种结局，四种都离开 `plans/`：
 
 | 结局 | 怎么走 |
 |---|---|
-| 转成待办 | `待办` 模式把它写进 `tasks/` |
+| 转成待办 | `task` 模式把它写进 `tasks/` |
 | 定案成设计 | 收尾时先问用户，确认后写进 `design.md` 对应的区 |
 | 放弃 | 理由不显然的，问要不要记 ADR；然后删 |
 | 顺手做完 | 某次会话里直接解决了；结果是长期成立的事实，就写到它该在的地方（`design.md`、`context.md` 的坑） |

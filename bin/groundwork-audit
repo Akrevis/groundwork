@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// groundwork 体检 —— /groundwork:docs 体检的机械那一半。
+// groundwork 体检 —— /groundwork:docs audit 的机械那一半。
 //
 // 检测可以机械化，修复通常要判断。这个脚本只检测、从不写文件。它报告查到了什么，
 // 也同样要紧地报告跳过了什么。
@@ -454,7 +454,7 @@ function render(results, root) {
   lines.push('  · 文档和实现对不对得上（design.md §8）');
   lines.push('  · 注入是不是真的在跑——这里只查了脚本能执行');
   lines.push('  · 归档背景和它涉及的代码还对不对得上');
-  lines.push('  · 各处描述是否仍然成立、roadmap 的阶段划分准不准（那是体检命令的判断项）');
+  lines.push('  · 各处描述是否仍然成立、roadmap 的阶段划分准不准（那是 audit 模式的判断项）');
   return lines.join('\n');
 }
 
