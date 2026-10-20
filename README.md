@@ -112,7 +112,8 @@ docs/
 ├── 4-testing/
 │   └── testing.md            怎么验证：命令、测了什么、测不到什么
 ├── 5-release/
-│   └── release.md            怎么发布、发布前查什么、怎么回滚
+│   ├── release.md            怎么发布、发布前查什么、怎么回滚
+│   └── diagrams/             发布与更新怎么走的图
 ├── 6-maintenance/
 │   └── archive/              做完了、结果还在被依赖的任务背景
 ├── plans/                    还没定的：这一阶段的草案、未决问题、待验证的事、已知缺陷

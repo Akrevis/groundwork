@@ -1,6 +1,6 @@
 {
   "name": "groundwork",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "一个人借助 AI，把项目从想法推进到发布和维护的工程骨架。文档按需求、设计、开发、测试、发布、维护组织；会话开场强制注入项目的真实状态（docs/context.md ＋ git 状态），再配一套 /groundwork:docs 工作流让它保持最新。没建档的项目完全静默。",
   "author": {
     "name": "Akrevis"
