@@ -1,14 +1,14 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "groundwork",
-  "description": "给 coding agent 用的人机协作纪律包。",
+  "description": "一个人借助 AI 推进项目的工程骨架。",
   "owner": {
     "name": "Akrevis"
   },
   "plugins": [
     {
       "name": "groundwork",
-      "description": "减少大型项目里的 AI 幻觉：会话开场就把项目的真实状态放进上下文，AI 可编造的余地就少了。注入层和文档层只依赖 git 与 markdown。",
+      "description": "一个人借助 AI，把项目从想法推进到发布和维护：每个环节定下该定的、留下该留的，会话开场就把项目的真实状态放进上下文，AI 不编造、不改坏。注入层和文档层只依赖 git 与 markdown，项目规模不限。",
       "source": "./",
       "category": "productivity"
     }
