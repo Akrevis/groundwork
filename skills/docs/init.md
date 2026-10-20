@@ -2,18 +2,22 @@
 
 ## 1. 预检
 
-`docs/context.md` **已经存在** → 停下，告诉用户这个项目已经建过档，问他是要 `wrap` 更新它，还是真的要重建。**绝不覆盖**——那个文件里的每一条都是问来的，覆盖等于重新问一遍。
+`docs/context.md` **已经存在**：
+
+- 旧位置上还有东西——`docs/tasks/` 或 `docs/archive/` 里有文档，或者有 `docs/design.md` → 这是 groundwork 3.x 建的档，跳到文末的「旧布局迁移」
+- 否则 → 停下，告诉用户这个项目已经建过档，问他是要 `wrap` 更新它，还是真的要重建。**绝不覆盖**——那个文件里的每一条都是问来的，覆盖等于重新问一遍
 
 **先看项目里已经有什么。** 列出 `docs/` 下和仓库根目录的 markdown 文件，排除 `README*`、`LICENSE*`、`CHANGELOG*`、`CONTRIBUTING*`。有发现 → **逐个停下问**它该归到哪：
 
 | 现有文件 | 可以去哪 |
 |---|---|
-| 设计文档 | 变成 `design.md`——哪些属于核心区、哪些属于阶段区 |
+| 设计文档 | 拆成 `1-requirements/requirements.md`（意图、边界）和 `2-design/architecture.md`（原则、当前架构、风险） |
 | 决策记录 | 变成 `devlog.md`，只留现在有效的 |
-| 待办或待定清单 | 每一条变成 `plans/` 话题或 `tasks/` 待办 |
+| 测试说明、发布说明 | 变成 `4-testing/testing.md`、`5-release/release.md` |
+| 待办或待定清单 | 每一条变成 `plans/` 话题或 `3-development/tasks/` 待办 |
 | 其他 | 留在原处，不进这套布局 |
 
-**绝不自己移动、改名或改写。** 它们装着用户的工作，猜错了就得手工回退。写代码之前写的设计文档是设计稿，按设计稿映射进 `design.md`，不要把它说成架构快照。
+**绝不自己移动、改名或改写。** 它们装着用户的工作，猜错了就得手工回退。写代码之前写的设计文档是设计稿，按设计稿映射，不要把它说成架构快照。
 
 ## 2. 能机械读到的先读，不问
 
@@ -53,7 +57,7 @@
 
 ## 5. 生成
 
-写 `docs/context.md`（按 SKILL.md 的模板）和第 4 步的开局话题、草案。**不建别的文件和目录**——`tasks/`、`archive/` 等到第一个文件出现时才建。
+写 `docs/context.md`（按 SKILL.md 的模板）和第 4 步的开局话题、草案。**不建别的文件和目录**——环节目录等到第一个文件出现时才建。
 
 ## 6. 提交和报告
 
@@ -63,3 +67,25 @@
 - **注入怎么生效**：装好 groundwork 插件就行，不用任何配置
 - 下次会话开场会出现 `<groundwork-context>`，「待讨论」那一行会显示最靠前的开局话题或草案
 - **下一步**：建了草案的，接下来的讨论从起草开始——跟 AI 说说你想要它做什么、怎么用、在哪用，它按 `decision-order` 出草案
+
+## 旧布局迁移
+
+groundwork 4.0 把文档按环节分了目录（ADR-029），3.x 建的档要搬一次。hook 不再读旧位置：不迁移，待办就从注入里消失。
+
+1. **列出要搬的，先给用户看**：
+
+   | 旧位置 | 新位置 |
+   |---|---|
+   | `docs/tasks/` | `docs/3-development/tasks/` |
+   | `docs/archive/` | `docs/6-maintenance/archive/` |
+   | `docs/design.md` 的意图、边界 | `docs/1-requirements/requirements.md` |
+   | `docs/design.md` 的原则、技术约束、当前架构、已知风险 | `docs/2-design/architecture.md` |
+   | `docs/design.md` 里的测试说明、发布流程（有的话） | `docs/4-testing/testing.md`、`docs/5-release/release.md` |
+   | 仓库里已有的图（`.excalidraw`、`.drawio`、图片），不管在哪个目录 | 按 SKILL.md「图」一节的对应关系建议去处；图不是契约，用户说不挪就不挪 |
+
+   `design.md` 怎么拆是判断：**逐节标出去处，用户确认之后再动手**。
+2. **记下漂移警告**：开场注入里有「context.md 可能过期」的，把落后几个提交、哪些目录变了原样记下来。迁移要改 `context.md` 里的路径，hook 以最后一次改它的 commit 为基线，一改警告就清零——而迁移只核对了路径，没核对那些提交带来的别的变化
+3. **搬**：目录用 `git mv`，保留历史。`design.md` 先 `git mv` 成 `architecture.md`，再把别的部分移出去——历史跟着架构文档走。拆开后各文件的章节从 1 起，用阿拉伯数字重新编号
+4. **改引用**：别处的 `design.md §x`、`第四节` 这类引用，改成「新文件名 §新节号」；不带文件名的旧引用也补上文件名，体检只核对带文件名的。`context.md`、`roadmap.md`、话题、待办、归档背景、代码注释里提到旧路径的一并改。**记录当时发生了什么的地方**（backlog、讨论记录）写成「当时设计文档的某某一节」，不带 `§`：那是历史，不是引用。`context.md` 的日期不改——它的意思是「已核对」，迁移没做核对
+5. **验证**：跑 `groundwork-audit`，`legacy-layout`、`section-refs`、`dead-links` 三条都通过才算迁完
+6. **提交**：一个 commit（见 SKILL.md「提交」），然后报告：搬了什么、`design.md` 每一节去了哪；第 2 步记下的漂移警告原样附上，并建议接着跑 `wrap` 核对那些提交

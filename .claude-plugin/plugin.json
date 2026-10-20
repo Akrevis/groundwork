@@ -1,6 +1,6 @@
 {
   "name": "groundwork",
-  "version": "3.3.0",
+  "version": "4.0.0",
   "description": "给 coding agent 用的人机协作纪律。会话开场强制注入项目的真实状态（docs/context.md ＋ git 状态），AI 可编造的余地就少了；再配一套 /groundwork:docs 工作流让这份状态保持最新。没建档的项目完全静默。",
   "author": {
     "name": "Akrevis"

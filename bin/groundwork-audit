@@ -66,6 +66,9 @@ function makeCtx(root) {
 
 // ---------- 检查 ----------
 // 每条返回一个发现的字符串数组，空数组表示通过。
+
+// 装「现在成立的决定」的两份文档：需求（为什么做、做到哪）和架构（现在什么样）。
+const DESIGN_DOCS = ['docs/1-requirements/requirements.md', 'docs/2-design/architecture.md'];
 // `skip(ctx)` 返回字符串表示「这里不适用」，并把原因印出来——
 // 对跳过的检查一声不吭，全绿就会变成虚假的信心。
 
@@ -213,20 +216,55 @@ const CHECKS = [
   {
     id: 'section-refs',
     group: 'form',
-    title: '跨文件的章节引用都能找到',
-    skip: (c) => (c.exists('docs/design.md') ? null : '没有 docs/design.md'),
+    title: '章节引用都能找到',
+    skip: (c) => (c.exists('docs') ? null : '没有 docs/'),
     run(c) {
-      const design = c.read('docs/design.md') || '';
+      // 带文件名的引用（`architecture.md §3.2`）到那份文件里找；不带文件名的，只在本身有
+      // 编号章节的文档里查，指的是它自己。别处不带文件名的 §（「karpathy §1」、某个 skill
+      // 的 §2）指的不是 docs/ 里的文档，查不了——所以跨文件的引用一律写上文件名。
+      const byName = new Map();
+      for (const f of walk(c, 'docs').filter((f) => f.endsWith('.md'))) {
+        const name = path.basename(f);
+        byName.set(name, [...(byName.get(name) || []), f]);
+      }
+      // 文件名在 docs/ 以外也找不到，才算引用了不存在的文件：「SKILL.md §2」指的是 skill，
+      // 它的节号不归这里查。让 git 按名字匹配，理由同 dead-links。
+      const inRepo = (ref) =>
+        c.exists(ref) || !!c.git(`ls-files --cached --others --exclude-standard -- ":(glob)**/${path.basename(ref)}"`);
+      const numbered = (body) => /^#{2,4} \d/m.test(body);
+      const has = (file, n) => new RegExp(`^#{2,4} ${n.replace('.', '\\.')}[ .]`, 'm').test(c.read(file) || '');
       const seen = new Set();
       const out = [];
       for (const dir of ['docs', 'skills', 'hooks']) {
         for (const file of walk(c, dir)) {
           const body = c.read(file) || '';
-          for (const m of body.matchAll(/§(\d+(?:\.\d+)?)/g)) {
-            if (seen.has(m[1])) continue;
-            seen.add(m[1]);
-            if (!new RegExp(`^#{2,4} ${m[1].replace('.', '\\.')}[ .]`, 'm').test(design)) {
-              out.push(`${file} 引用了 §${m[1]}，design.md 里没有这一节`);
+          // 并列的节号（`architecture.md §3、§4 和 §5`）都算在前面那个文件名头上
+          const refs = [];
+          for (const m of body.matchAll(/(?:`?([\w./-]+\.md)`?[ \t]*)?§(\d+(?:\.\d+)?)((?:[ \t]*[、，,和与及][ \t]*§\d+(?:\.\d+)?)*)/g)) {
+            refs.push([m[1], m[2]]);
+            for (const more of m[3].matchAll(/§(\d+(?:\.\d+)?)/g)) refs.push([m[1], more[1]]);
+          }
+          for (const [ref, n] of refs) {
+            let targets = null;
+            if (ref) {
+              targets = byName.get(path.basename(ref));
+              if (!targets) {
+                if (!seen.has(`missing:${ref}`) && c.git('rev-parse --git-dir') !== null && !inRepo(ref)) {
+                  out.push(`${file} 引用了 ${ref} §${n}，仓库里没有 ${path.basename(ref)}`);
+                }
+                seen.add(`missing:${ref}`);
+                continue;
+              }
+            } else if (file.startsWith('docs/') && numbered(body)) {
+              targets = [file];
+            } else {
+              continue;
+            }
+            const key = `${targets.join(',')}#${n}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            if (!targets.some((t) => has(t, n))) {
+              out.push(`${file} 引用了 ${ref ? `${path.basename(ref)} ` : ''}§${n}，${path.basename(targets[0])} 里没有这一节`);
             }
           }
         }
@@ -269,9 +307,9 @@ const CHECKS = [
           out.push(`第 ${i + 1} 行手写了 hook 会采集的字段：${line.trim()}`);
         }
         // 这两样在 2.0.0 之前是契约，所以每份老 context.md 都带着。留着并非无害：
-        // 那张表是 docs/tasks/ 的第二份拷贝，迟早过期；那个 hash 读起来像基线，却早已没人用。
+        // 那张表是待办目录的第二份拷贝，迟早过期；那个 hash 读起来像基线，却早已没人用。
         if (/^#{2,6}\s*(active tasks|当前活跃任务|活跃任务|待办)/i.test(line)) {
-          out.push(`第 ${i + 1} 行手写了待办列表——hook 会从 docs/tasks/ 读：${line.trim()}`);
+          out.push(`第 ${i + 1} 行手写了待办列表——hook 会从 docs/3-development/tasks/ 读：${line.trim()}`);
         }
         if (/^>.*\bcommit\s+[0-9a-f]{7,40}\b/i.test(line)) {
           out.push(`第 ${i + 1} 行手写了基线 commit——hook 从 git log 取；留下日期，删掉 hash`);
@@ -282,10 +320,29 @@ const CHECKS = [
   },
 
   {
+    id: 'legacy-layout',
+    group: 'placement',
+    title: '没有留在 3.x 旧位置上的文档',
+    skip: (c) => (c.exists('docs/context.md') ? null : '没有 docs/context.md——项目没建档'),
+    run(c) {
+      // 4.0 把待办、归档背景、设计文档挪进了环节目录（ADR-029）。旧位置上的东西 hook 不再读：
+      // 待办从注入里消失，没有任何报错。只看有没有文档，不看目录在不在：git 不跟踪空目录。
+      const out = [];
+      if (c.list('docs/tasks', '.md').length) out.push('docs/tasks/ 里还有待办——该在 docs/3-development/tasks/');
+      if (c.list('docs/archive', '.md').length) out.push('docs/archive/ 里还有归档背景——该在 docs/6-maintenance/archive/');
+      if (c.exists('docs/design.md')) {
+        out.push('docs/design.md 还在——拆进 docs/1-requirements/requirements.md 和 docs/2-design/architecture.md');
+      }
+      return out;
+    },
+  },
+
+  {
     id: 'misplaced-content',
     group: 'placement',
-    title: 'design.md 里没有 ADR 的标记，devlog.md 里没有进度',
-    skip: (c) => (c.exists('docs/design.md') || c.exists('docs/devlog.md') ? null : '没有 design.md 或 devlog.md'),
+    title: '需求、架构文档里没有 ADR 的标记，devlog.md 里没有进度',
+    skip: (c) =>
+      DESIGN_DOCS.some((f) => c.exists(f)) || c.exists('docs/devlog.md') ? null : '没有需求、架构文档或 devlog.md',
     run(c) {
       const out = [];
       const scan = (file, re, label) => {
@@ -293,7 +350,7 @@ const CHECKS = [
           if (re.test(line)) out.push(`${file}:${i + 1} ${label}：${line.trim().slice(0, 70)}`);
         });
       };
-      scan('docs/design.md', /候选方案|何时重审|options considered|revisit when/i, 'ADR 的标记——可能该放进 devlog');
+      for (const f of DESIGN_DOCS) scan(f, /候选方案|何时重审|options considered|revisit when/i, 'ADR 的标记——可能该放进 devlog');
       scan(
         'docs/devlog.md',
         /^\s*[-|]?\s*(todo|not started|next up)\b|^\s*[-|]?\s*(当前进度|未开始|下一步)/i,
@@ -451,7 +508,7 @@ function render(results, root) {
   );
   lines.push('');
   lines.push('这里没查的——机械检查够不到：');
-  lines.push('  · 文档和实现对不对得上（design.md §8）');
+  lines.push('  · 文档和实现对不对得上（architecture.md §4）');
   lines.push('  · 注入是不是真的在跑——这里只查了脚本能执行');
   lines.push('  · 归档背景和它涉及的代码还对不对得上');
   lines.push('  · 各处描述是否仍然成立、roadmap 的阶段划分准不准（那是 audit 模式的判断项）');

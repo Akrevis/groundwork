@@ -12,9 +12,22 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const AGGREGATE_THRESHOLD = 10; // 未提交的文件超过这个数，按目录聚合——见 docs/design.md §4.4
+const AGGREGATE_THRESHOLD = 10; // 未提交的文件超过这个数，按目录聚合——见 architecture.md §3.4
 const SUBJECT_MAX = 50; // 单条提交主题的截断长度
 const DRIFT_MIN = 5; // 落后多少个提交才值得警告——太灵敏会退化成背景噪音
+
+// 目录契约（ADR-029）：hook 只认这几个路径，其余都是约定。
+const TASKS_DIR = 'docs/3-development/tasks';
+const ARCHIVE_DIR = 'docs/6-maintenance/archive';
+const PLANS_DIR = 'docs/plans';
+
+// 3.x 的旧位置。4.0 把它们挪进了环节目录，没迁移的项目里，待办在注入里整个消失，
+// 而且没有任何报错——所以发现旧位置有东西，就直接说出来。
+const LEGACY = [
+  { path: 'docs/tasks', dir: true, note: '里的待办没被列出' },
+  { path: 'docs/archive', dir: true, note: '里的归档背景' },
+  { path: 'docs/design.md', dir: false, note: '' },
+];
 
 // 唯一一条常驻规则（ADR-012）。判据不是「它重不重要」，而是「犯错的那一刻，
 // AI 自己知道吗」——写一个虚构的分支时它不知道，所以靠概率触发的 skill 没用，
@@ -51,7 +64,7 @@ function dirOf(file) {
 }
 
 // 未提交的改动：文件少就列文件名，文件多就按目录聚合。
-// 聚合不只是为了省体积——展开的 47 行会稀释掉旁边真正重要的项目定位（§2.4 理由一）。
+// 聚合不只是为了省体积——展开的 47 行会稀释掉旁边真正重要的项目定位（architecture.md §1.4 理由一）。
 function summarizeStatus(porcelain) {
   const files = porcelain
     .split('\n')
@@ -138,7 +151,7 @@ function markdownIn(root, dir) {
 // 每份待办最后一次被提交的时间，一条 git 命令取完：log 从新到旧，
 // 每个文件第一次出现的那个时间就是它最后一次被改动的时间。
 function lastTouched(root) {
-  const log = git('log --format=@%ct --name-only -- docs/tasks', root);
+  const log = git(`log --format=@%ct --name-only -- ${TASKS_DIR}`, root);
   if (log === null) return null;
   const seen = new Map();
   let ct = null;
@@ -149,17 +162,17 @@ function lastTouched(root) {
   return seen;
 }
 
-// 待办从 docs/tasks/ 读出来，绝不手写进 context.md：手抄的表是目录列表的第二份拷贝，
+// 待办从 tasks/ 读出来，绝不手写进 context.md：手抄的表是目录列表的第二份拷贝，
 // 漂移的永远是拷贝——建了却忘了登记的任务，整个生命周期对每个会话都隐形。
 // 文件名以序号开头，排序就是开工顺序。后面标出多久没动：停下的待办不会自己离开
 // 这个目录，天数让它在注入里自己露出来，不靠谁记得挪走它。
 function pendingTasks(root, now = Date.now()) {
-  const names = markdownIn(root, 'docs/tasks');
+  const names = markdownIn(root, TASKS_DIR);
   if (!names.length) return [];
   const touched = lastTouched(root);
   return names.map((name) => {
     if (touched === null) return name; // 不是 git 仓库：只列名字，不猜天数
-    const ct = touched.get(`docs/tasks/${name}.md`);
+    const ct = touched.get(`${TASKS_DIR}/${name}.md`);
     if (ct === undefined) return `${name}（未提交）`;
     const days = Math.floor((now / 1000 - ct) / 86400);
     return `${name}（${days <= 0 ? '今天动过' : `${days} 天没动`}）`;
@@ -175,17 +188,31 @@ function docPointers(root) {
     if (fs.existsSync(path.join(root, p))) out.push(`${label} → ${p}`);
   };
   file('docs/roadmap.md', '阶段');
-  file('docs/design.md', '设计');
+  file('docs/1-requirements/requirements.md', '需求');
+  file('docs/2-design/architecture.md', '架构');
   file('docs/devlog.md', '决策理由');
-  const plans = markdownIn(root, 'docs/plans');
+  file('docs/4-testing/testing.md', '测试');
+  file('docs/5-release/release.md', '发布');
+  const plans = markdownIn(root, PLANS_DIR);
   if (plans.length) {
     // 话题文件名以决策层级开头（0～7），最小的就是现在该定的那一层。
     // 只认带层级前缀的，别的文件名不拿来当「最靠前」。
     const first = plans.find((p) => /^[0-7]-/.test(p));
-    out.push(`待讨论 → docs/plans（${plans.length} 个${first ? `，最靠前：${first}` : ''}）`);
+    out.push(`待讨论 → ${PLANS_DIR}（${plans.length} 个${first ? `，最靠前：${first}` : ''}）`);
   }
-  if (markdownIn(root, 'docs/archive').length) out.push('已完成任务的背景 → docs/archive');
+  if (markdownIn(root, ARCHIVE_DIR).length) out.push(`已完成任务的背景 → ${ARCHIVE_DIR}`);
   return out.length ? out.join(' | ') : null;
+}
+
+// 旧布局只看「有没有东西」，不看目录在不在：git 不跟踪空目录，迁移后留在本机的
+// 空目录不算没迁完。
+function legacyLayout(root) {
+  const found = LEGACY.filter((l) =>
+    l.dir ? markdownIn(root, l.path).length > 0 : fs.existsSync(path.join(root, l.path))
+  );
+  if (!found.length) return null;
+  const items = found.map((l) => `\`${l.path}${l.dir ? '/' : ''}\`${l.note}`).join('、');
+  return `## ⚠ 旧目录布局（groundwork 3.x）\n${items}。4.0 起它们在环节目录里，跑 \`/groundwork:docs init\` 迁移。`;
 }
 
 function stamp() {
@@ -220,7 +247,7 @@ function build(root) {
   const log = git('log --oneline -10', root);
   if (log) {
     // 每条主题都截断：注入的是「最近发生了什么」的轮廓，不是完整的 message。
-    // 十条不截断的主题会占半屏——正是 §2.4 说的注意力稀释。
+    // 十条不截断的主题会占半屏——正是 architecture.md §1.4 说的注意力稀释。
     const lines = log.split('\n').map((l) => '  ' + truncate(l, SUBJECT_MAX));
     auto.push('最近提交：\n' + lines.join('\n'));
   }
@@ -244,8 +271,11 @@ function build(root) {
     }
   }
 
-  // 包的知识，不是项目的知识——写死在这里，项目文件就不必重复（§4.2）。只列存在的：
-  // 建档不预建 design.md、devlog.md，指向不存在的文件会让 AI 白跑一趟。
+  const legacy = legacyLayout(root);
+  if (legacy) parts.push(legacy);
+
+  // 包的知识，不是项目的知识——写死在这里，项目文件就不必重复（architecture.md §3.2）。
+  // 只列存在的：建档只建 context.md，指向不存在的文件会让 AI 白跑一趟。
   const pointers = docPointers(root);
   if (pointers) parts.push(`## 文档在哪\n${pointers}`);
 
@@ -265,5 +295,5 @@ if (require.main === module) {
     // 静默。hook 坏掉的最坏结果必须是「这次没注入」，绝不能是「用户开不了会话」。
   }
 } else {
-  module.exports = { summarizeStatus, summarizeDirs, truncate, detectStack, pendingTasks, docPointers, build, STANDING_RULE };
+  module.exports = { summarizeStatus, summarizeDirs, truncate, detectStack, pendingTasks, docPointers, legacyLayout, build, STANDING_RULE };
 }

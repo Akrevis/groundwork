@@ -91,8 +91,8 @@ t('dead-links 抓出引用了却不存在的文件', () => {
 
 t('文件在就不报', () => {
   const root = tmp();
-  write(root, 'docs/context.md', '# c\n\n见 `docs/design.md`\n');
-  write(root, 'docs/design.md', '# d\n');
+  write(root, 'docs/context.md', '# c\n\n见 `docs/2-design/architecture.md`\n');
+  write(root, 'docs/2-design/architecture.md', '# a\n');
   assert.deepStrictEqual(findings(root, 'dead-links'), []);
   clean(root);
 });
@@ -125,12 +125,12 @@ t('docs-untracked 抓出被忽略的和没提交的，放过已提交的', () =>
   execSync('git add -A', { cwd: root, stdio: 'ignore' });
   execSync('git -c user.name=t -c user.email=t@example.com commit -q -m kept', { cwd: root, stdio: 'ignore' });
   write(root, 'docs/secret.md', '# 被忽略\n');
-  write(root, 'docs/tasks/01-中文.md', '# 还没提交\n');
+  write(root, 'docs/3-development/tasks/01-中文.md', '# 还没提交\n');
   const out = findings(root, 'docs-untracked');
   assert.strictEqual(out.length, 2, out.join('|'));
   assert.ok(out.some((f) => /docs\/secret\.md 被 git 忽略/.test(f)), out.join('|'));
   // 中文文件名原样出现，不是八进制转义
-  assert.ok(out.some((f) => /docs\/tasks\/01-中文\.md 还没提交/.test(f)), out.join('|'));
+  assert.ok(out.some((f) => /docs\/3-development\/tasks\/01-中文\.md 还没提交/.test(f)), out.join('|'));
   assert.ok(!out.some((f) => /kept\.md/.test(f)));
   clean(root);
 });
@@ -167,23 +167,69 @@ t('adr-numbering 抓出重号和乱序', () => {
 t('adr-refs 抓出引用了已删 ADR 的文档，devlog 自己的引用不算', () => {
   const root = tmp();
   write(root, 'docs/devlog.md', '## ADR-003 · c\n\n取代 ADR-002（已删除，原文见 `abc1234`）\n');
-  write(root, 'docs/design.md', '# d\n\n理由见 ADR-002，另见 ADR-003。\n');
+  write(root, 'docs/2-design/architecture.md', '# a\n\n理由见 ADR-002，另见 ADR-003。\n');
   write(root, 'skills/x/SKILL.md', '---\nname: x\n---\n按 ADR-003。\n');
   const out = findings(root, 'adr-refs');
   assert.strictEqual(out.length, 1, out.join('|'));
-  assert.match(out[0], /docs\/design\.md 引用了 ADR-002/);
+  assert.match(out[0], /docs\/2-design\/architecture\.md 引用了 ADR-002/);
   clean(root);
 });
 
 // ---------- 章节引用 ----------
+// 带文件名的到那份文件里找；不带的只在有编号章节的文档里查，指它自己。
 
-t('section-refs 一级、二级节号都查', () => {
+t('section-refs 带文件名的引用，一级、二级节号都查', () => {
   const root = tmp();
-  write(root, 'docs/design.md', '# d\n\n## 4. 架构\n\n### 4.2 契约\n\n## 8. 风险\n');
-  write(root, 'docs/plans/7-x.md', '# x\n\n见 §4.2、§8 和 §7。\n');
+  write(root, 'docs/2-design/architecture.md', '# a\n\n## 3. 架构\n\n### 3.2 契约\n\n## 4. 风险\n');
+  write(root, 'docs/plans/7-x.md', '# x\n\n见 `architecture.md` §3.2、architecture.md §4 和 architecture.md §7。\n');
   const out = findings(root, 'section-refs');
-  assert.strictEqual(out.length, 1, out.join('|'));
-  assert.match(out[0], /§7/);
+  assert.deepStrictEqual(out, ['docs/plans/7-x.md 引用了 architecture.md §7，architecture.md 里没有这一节']);
+  clean(root);
+});
+
+t('section-refs 不带文件名的，在有编号章节的文档里指它自己', () => {
+  const root = tmp();
+  write(root, 'docs/1-requirements/requirements.md', '# q\n\n## 1. 要解决什么\n\n见 §2。\n\n## 2. 边界\n\n见 §3。\n');
+  write(root, 'docs/devlog.md', '## ADR-001 · a\n\n借 karpathy §3，见 `verify-first` §2。\n');
+  const out = findings(root, 'section-refs');
+  assert.deepStrictEqual(out, ['docs/1-requirements/requirements.md 引用了 §3，requirements.md 里没有这一节']);
+  clean(root);
+});
+
+// 并列写法里后面的节号也要查：它们指的是同一份文件（2026-10-20 迁移 Novame 时发现 7 处漏查）。
+t('section-refs 并列的节号都算在前面的文件名头上', () => {
+  const root = tmp();
+  write(root, 'docs/2-design/architecture.md', '# a\n\n## 3. 架构\n\n## 4. 风险\n');
+  write(root, 'docs/plans/7-x.md', '# x\n\n见 `architecture.md` §3、§4 和 §9。\n');
+  const out = findings(root, 'section-refs');
+  assert.deepStrictEqual(out, ['docs/plans/7-x.md 引用了 architecture.md §9，architecture.md 里没有这一节']);
+  clean(root);
+});
+
+// 迁移最容易漏的就是这种：文件拆了、改名了，旧文件名还挂在引用里。
+t('section-refs 抓出引用了仓库里不存在的文件，放过 docs/ 以外的文件', () => {
+  const root = tmp();
+  gitRepo(root);
+  write(root, 'docs/devlog.md', '## ADR-001 · a\n\n见 `design.md` §4.4，另见 SKILL.md §2。\n');
+  write(root, 'skills/x/SKILL.md', '---\nname: x\n---\n## 2. 做法\n');
+  const out = findings(root, 'section-refs');
+  assert.deepStrictEqual(out, ['docs/devlog.md 引用了 design.md §4.4，仓库里没有 design.md']);
+  clean(root);
+});
+
+// ---------- 3.x 的旧位置 ----------
+
+t('legacy-layout 抓出旧位置上的待办、归档背景和 design.md，放过空目录', () => {
+  const root = tmp();
+  write(root, 'docs/context.md', '# c\n');
+  fs.mkdirSync(path.join(root, 'docs', 'archive'), { recursive: true });
+  assert.deepStrictEqual(findings(root, 'legacy-layout'), []);
+  write(root, 'docs/tasks/01-a.md', '# a\n');
+  write(root, 'docs/design.md', '# d\n');
+  const out = findings(root, 'legacy-layout');
+  assert.strictEqual(out.length, 2, out.join('|'));
+  assert.ok(out.some((f) => /docs\/tasks\/ 里还有待办/.test(f)), out.join('|'));
+  assert.ok(out.some((f) => /docs\/design\.md 还在/.test(f)), out.join('|'));
   clean(root);
 });
 
@@ -249,9 +295,9 @@ t('只有日期的头部和别的标题不报', () => {
   clean(root);
 });
 
-t('misplaced-content 抓出 design.md 里的何时重审和 devlog 里的进度', () => {
+t('misplaced-content 抓出架构文档里的何时重审和 devlog 里的进度', () => {
   const root = tmp();
-  write(root, 'docs/design.md', '# d\n\n**何时重审**：以后再说\n');
+  write(root, 'docs/2-design/architecture.md', '# a\n\n**何时重审**：以后再说\n');
   write(root, 'docs/devlog.md', '## ADR-001 · a\n\n- 下一步：补测试\n');
   const out = findings(root, 'misplaced-content');
   assert.strictEqual(out.length, 2, out.join('|'));

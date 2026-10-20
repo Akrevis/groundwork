@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
-const { summarizeStatus, summarizeDirs, truncate, pendingTasks, docPointers, build, STANDING_RULE } = require('./inject-context.js');
+const { summarizeStatus, summarizeDirs, truncate, pendingTasks, docPointers, legacyLayout, build, STANDING_RULE } = require('./inject-context.js');
 
 let n = 0;
 const t = (name, fn) => {
@@ -68,8 +68,8 @@ t('没有改动返回 null', () => {
 // 解析会吃掉第一个路径的第一个字符。早先的测试都直接喂理想的 porcelain，没有一条
 // 覆盖 hook 实际收到的字符串。
 t('输入 trim 没 trim，第一个路径都完整', () => {
-  const raw = ' M docs/context.md\n M docs/design.md';
-  const want = '2 个文件 — docs/context.md、docs/design.md';
+  const raw = ' M docs/context.md\n M docs/devlog.md';
+  const want = '2 个文件 — docs/context.md、docs/devlog.md';
   assert.strictEqual(summarizeStatus(raw), want);
   assert.strictEqual(summarizeStatus(raw.trim()), want);
 });
@@ -98,7 +98,7 @@ t('超长的截断并加省略号', () => {
 });
 
 // --- build：没建档的项目必须完全静默 ---
-// §4.4 的硬约束：没有 context.md 就什么都不做，不提示、不打扰。
+// architecture.md §3.4 的硬约束：没有 context.md 就什么都不做，不提示、不打扰。
 t('没有 docs/context.md 返回 null', () => {
   const dir = tmp();
   assert.strictEqual(build(dir), null);
@@ -123,15 +123,52 @@ t('有 context.md 时输出包在标签里', () => {
 });
 
 // --- docPointers：只列真实存在的 ---
-// 建档不预建 design.md、devlog.md，指向不存在的文件会让 AI 白跑一趟。
+// 建档只建 context.md，其余文档有内容才出现；指向不存在的文件会让 AI 白跑一趟。
 t('只列存在的文档', () => {
   const dir = tmp();
   write(dir, 'docs/plans/7-细节.md', '# 细节\n');
   write(dir, 'docs/devlog.md', '# ADR\n');
   const out = docPointers(dir);
   assert.match(out, /决策理由 → docs\/devlog\.md/);
-  assert.doesNotMatch(out, /design\.md/);
+  assert.doesNotMatch(out, /architecture\.md/);
   assert.doesNotMatch(out, /archive/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// 环节目录里的文档按环节顺序列出：需求、架构、测试、发布。
+t('环节文档按环节顺序给指针', () => {
+  const dir = tmp();
+  write(dir, 'docs/5-release/release.md', '# r\n');
+  write(dir, 'docs/1-requirements/requirements.md', '# q\n');
+  write(dir, 'docs/4-testing/testing.md', '# t\n');
+  write(dir, 'docs/2-design/architecture.md', '# a\n');
+  assert.strictEqual(
+    docPointers(dir),
+    '需求 → docs/1-requirements/requirements.md | 架构 → docs/2-design/architecture.md | ' +
+      '测试 → docs/4-testing/testing.md | 发布 → docs/5-release/release.md'
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// --- legacyLayout：3.x 的旧位置还有东西就说出来 ---
+// 没迁移的项目里，待办在注入里整个消失，而且没有任何报错。
+t('旧位置有待办和 design.md 时提示迁移', () => {
+  const dir = tmp();
+  write(dir, 'docs/context.md', '# T\n');
+  write(dir, 'docs/tasks/01-a.md', '# a\n');
+  write(dir, 'docs/design.md', '# d\n');
+  const out = build(dir);
+  assert.match(out, /## ⚠ 旧目录布局（groundwork 3\.x）\n`docs\/tasks\/`里的待办没被列出、`docs\/design\.md`。/);
+  assert.match(out, /\/groundwork:docs init/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// git 不跟踪空目录：迁移完留在本机的空目录不算没迁完。
+t('旧位置只剩空目录时不提示', () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, 'docs', 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'docs', 'archive'), { recursive: true });
+  assert.strictEqual(legacyLayout(dir), null);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -156,10 +193,10 @@ t('没有层级话题时只给个数', () => {
 t('空的 plans/、archive/ 不给指针', () => {
   const dir = tmp();
   fs.mkdirSync(path.join(dir, 'docs', 'plans'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'docs', 'archive'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'docs', '6-maintenance', 'archive'), { recursive: true });
   assert.strictEqual(docPointers(dir), null);
-  write(dir, 'docs/archive/2026-01-01-done.md', '# done\n');
-  assert.strictEqual(docPointers(dir), '已完成任务的背景 → docs/archive');
+  write(dir, 'docs/6-maintenance/archive/2026-01-01-done.md', '# done\n');
+  assert.strictEqual(docPointers(dir), '已完成任务的背景 → docs/6-maintenance/archive');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -173,9 +210,9 @@ t('一份文档都没有返回 null', () => {
 t('不是 git 仓库时只列名字，按序号排，不带扩展名', () => {
   const dir = tmp();
   assert.deepStrictEqual(pendingTasks(dir), []); // 还没有目录是常态
-  write(dir, 'docs/tasks/02-b.md', '# b\n');
-  write(dir, 'docs/tasks/01-a.md', '# a\n');
-  write(dir, 'docs/tasks/notes.txt', '不是待办\n');
+  write(dir, 'docs/3-development/tasks/02-b.md', '# b\n');
+  write(dir, 'docs/3-development/tasks/01-a.md', '# a\n');
+  write(dir, 'docs/3-development/tasks/notes.txt', '不是待办\n');
   assert.deepStrictEqual(pendingTasks(dir), ['01-a', '02-b']);
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -184,13 +221,13 @@ t('不是 git 仓库时只列名字，按序号排，不带扩展名', () => {
 t('待办后面标出多久没动、没提交的标未提交', () => {
   const dir = tmp();
   gitIn(dir)('init -q');
-  write(dir, 'docs/tasks/01-a.md', '# a\n');
+  write(dir, 'docs/3-development/tasks/01-a.md', '# a\n');
   gitIn(dir, '2026-01-01T00:00:00Z')('add -A');
   gitIn(dir, '2026-01-01T00:00:00Z')('commit -q -m a');
-  write(dir, 'docs/tasks/02-b.md', '# b\n');
+  write(dir, 'docs/3-development/tasks/02-b.md', '# b\n');
   gitIn(dir, '2026-01-09T00:00:00Z')('add -A');
   gitIn(dir, '2026-01-09T00:00:00Z')('commit -q -m b');
-  write(dir, 'docs/tasks/03-c.md', '# c\n');
+  write(dir, 'docs/3-development/tasks/03-c.md', '# c\n');
   const now = Date.parse('2026-01-11T00:00:00Z');
   assert.deepStrictEqual(pendingTasks(dir, now), ['01-a（10 天没动）', '02-b（2 天没动）', '03-c（未提交）']);
   assert.deepStrictEqual(pendingTasks(dir, Date.parse('2026-01-09T08:00:00Z')).slice(1, 2), ['02-b（今天动过）']);
@@ -205,7 +242,7 @@ t('中文文件名原样注入，不变成转义码', () => {
   const git = gitIn(dir);
   git('init -q');
   write(dir, 'docs/context.md', '# T\n');
-  write(dir, 'docs/tasks/01-精简.md', '# 精简\n');
+  write(dir, 'docs/3-development/tasks/01-精简.md', '# 精简\n');
   git('add -A');
   git('commit -q -m 开工');
   write(dir, 'docs/新文件.md', '新\n');
